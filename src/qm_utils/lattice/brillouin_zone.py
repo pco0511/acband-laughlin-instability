@@ -1,4 +1,5 @@
 import itertools
+import random
 
 import numpy as np
 from einops import rearrange, pack
@@ -211,22 +212,47 @@ def test2():
     sample_lattice = sample_lattice.transformed(scale=scale, rot=rot)
 
     bz = BrillouinZone2D(lattice, sample_lattice)
-    
+    N_s = bz.n_samples
     
     # negation test
+    print("testing double negation...")
+    for i in range(N_s):
+        assert bz.neg(bz.neg(i)) == i
+
     for i in range(N_s):
         neg_i = bz.neg(i)
         print(f"-({i}) = ({neg_i})")
 
-
-    N = 10
-    N_s = bz.n_samples
+    N = 30
 
     # summation test
+    
+    # commutativity test
+    print("testing commutativity...")
+    for i, j in itertools.product(range(N_s), repeat=2):
+        assert bz.sum(i, j) == bz.sum(j, i)
 
+    # associativity test
+    print("testing associativity...")
+    for i, j, k in itertools.product(range(N_s), repeat=3):
+        assert bz.sum(i, bz.sum(j, k)) == bz.sum(bz.sum(i, j), k)
+
+
+    ij = list(itertools.product(range(N_s), repeat=2))
+
+    tests = random.sample(ij, N)
+    for i, j in tests:
+        print(f"({i}) + ({j}) = ({bz.sum(i, j)})")
 
     # subtraction test
 
+    print("testing -(a - b) == b - a ...")
+    for i, j in itertools.product(range(N_s), repeat=2):
+        assert bz.neg(bz.sub(i, j)) == bz.sub(j, i)
+
+    tests = random.sample(ij, N)
+    for i, j in tests:
+        print(f"({i}) - ({j}) = ({bz.sub(i, j)})")
 
 
     # plots
@@ -256,4 +282,4 @@ def test2():
     plt.show()
 
 if __name__ == "__main__":
-    test2()
+    test1()
