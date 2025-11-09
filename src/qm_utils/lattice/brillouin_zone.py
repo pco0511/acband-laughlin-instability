@@ -1,6 +1,8 @@
 import itertools
 import random
 
+
+
 import numpy as np
 from einops import rearrange, pack
 
@@ -58,12 +60,12 @@ class BrillouinZone2D:
         coords, _ = lattice.reciprocal_divmod(candidates)
         first_bz = np.logical_and(coords[:,0]==0, coords[:,1]==0)
 
-        self.sample_positions = candidates[first_bz]
-        self.sample_coords = sample_coords[first_bz]
+        self.sampled_momentums = candidates[first_bz]
+        self.sampled_coords = sample_coords[first_bz]
         self.n_samples = np.sum(first_bz)
 
         # maps
-        self.idx_from_coord = {(n1, n2) : idx for idx, (n1, n2) in enumerate(self.sample_coords)}
+        self.idx_from_coord = {(n1, n2) : idx for idx, (n1, n2) in enumerate(self.sampled_coords)}
 
         # look up tables
         N_s = self.n_samples
@@ -82,6 +84,18 @@ class BrillouinZone2D:
             j_neg = self.neg_table[j]
             self.sub_table[i, j] = self.sum_table[i, j_neg]
 
+    @property
+    def N_s(self): 
+        """alias for n_samples"""
+        return self.n_samples
+
+    def __iter__(self):
+        for idx in range(self.n_samples):
+            yield self.sampled_momentums[idx]
+
+    def __getitem__(self, idx):
+        return self.sampled_momentums[idx]
+
     def fold_coord(self, coord):
         pos = self.bz_sample_lattice.pos_from_coord(coord)
         (c1, c2), _ = self.lattice.reciprocal_divmod(pos)
@@ -94,18 +108,21 @@ class BrillouinZone2D:
         return (new1, new2)
 
     def _idx_neg(self, idx):
-        coord = self.sample_coords[idx]
+        coord = self.sampled_coords[idx]
         neg_coord = tuple(-x for x in coord)
         folded_coord = self.fold_coord(neg_coord)
         return self.idx_from_coord[folded_coord]
 
     def _idx_sum(self, idx1, idx2):
-        coord1 = self.sample_coords[idx1]
-        coord2 = self.sample_coords[idx2]
+        coord1 = self.sampled_coords[idx1]
+        coord2 = self.sampled_coords[idx2]
         sum_coord = tuple(x + y for x, y in zip(coord1, coord2))
         folded_coord = self.fold_coord(sum_coord)
         return self.idx_from_coord[folded_coord]
     
+    def zero(self):
+        return self.idx_from_coord[(0, 0)]
+
     def neg(self, idx):
         return self.neg_table[idx]
     
@@ -114,10 +131,6 @@ class BrillouinZone2D:
     
     def sub(self, idx1, idx2):
         return self.sub_table[idx1, idx2]
-
-    def momentum_sectors(n_particles):
-        pass
-
 
 def test1():
     import matplotlib.pyplot as plt
@@ -225,6 +238,10 @@ def test2():
 
     N = 30
 
+    print("zero:")
+    zero_idx = bz.zero()
+    print(f"0 = ({zero_idx})")
+
     # summation test
     
     # commutativity test
@@ -254,12 +271,10 @@ def test2():
     for i, j in tests:
         print(f"({i}) - ({j}) = ({bz.sub(i, j)})")
 
-
     # plots
 
-
     # First BZ Boundary:
-    sample_positions = bz.sample_positions
+    sampled_momentums = bz.sampled_momentums
     R = 3 * np.linalg.norm(t1)
     thetas = np.linspace(np.pi / 2, 5 * np.pi / 2, 7)
     hexagon_x = R * np.cos(thetas)
@@ -267,12 +282,12 @@ def test2():
 
     fig = plt.figure(figsize=(8, 8))
     ax = fig.add_subplot()
-    pos_x = sample_positions[:, 0]
-    pos_y = sample_positions[:, 1]
-    ax.scatter(pos_x, pos_y, s=250, c='k')
+    k_x = sampled_momentums[:, 0]
+    k_y = sampled_momentums[:, 1]
+    ax.scatter(k_x, k_y, s=250, c='k')
     for i in range(N_s):
-        x = pos_x[i]
-        y = pos_y[i]
+        x = k_x[i]
+        y = k_y[i]
         ax.text(x, y, f"{i}", fontsize=8, color="w", ha='center', va='center')
 
     ax.plot(hexagon_x, hexagon_y, color='k')
@@ -282,4 +297,4 @@ def test2():
     plt.show()
 
 if __name__ == "__main__":
-    test1()
+    test2()
