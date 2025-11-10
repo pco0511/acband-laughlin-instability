@@ -301,4 +301,4 @@ def test2():
     plt.show()
 
 if __name__ == "__main__":
-    test2()
+    test1()
