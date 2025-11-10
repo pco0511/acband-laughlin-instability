@@ -148,7 +148,7 @@ def test1():
     b = (4 * np.pi) / (a_M * sqrt3)
     b1, b2 = lattice.reciprocal_lattice_vectors
     b3 = -(b1 + b2)
-    
+
     # N = 27 grid
     t1 = (1 / 9) * (b1 - b2)
     t2 = (1 / 9) * (b1 - b3)
@@ -168,7 +168,7 @@ def test1():
     xx = np.linspace(-N, N, 2 * N + 1)
     yy = np.linspace(-N, N, 2 * N + 1)
     mgrid = np.meshgrid(xx, yy, sparse=True)
-    points = lattice.reciprocal().get_points(*mgrid)
+    points = lattice.reciprocal().get_points(*mgrid, flatten=True)
 
     bz = BrillouinZone2D(lattice, sample_lattice)
     print(f"{bz.n11=}, {bz.n12=}, {bz.n21=}, {bz.n22=}")
@@ -178,17 +178,17 @@ def test1():
     xx = np.linspace(-N, N, 2 * N + 1)
     yy = np.linspace(-N, N, 2 * N + 1)
     mgrid = np.meshgrid(xx, yy, sparse=True)
-    samples = sample_lattice.get_points(*mgrid)
-    
+    samples = sample_lattice.get_points(*mgrid, flatten=True)
+
     lattice_coord, _ = lattice.reciprocal_divmod(samples)
     colors = np.zeros((samples.shape[0], 3))
     colors[:, 0] = 0.15
     colors[:, 1] = 0.5
     colors[:, 2] = 0.5
-    
+
     colors += lattice_coord[:, 0][:, None] * np.array([[0, 0.2, 0]])
     colors += lattice_coord[:, 1][:, None] * np.array([[0, 0.0, 0.2]])
-    
+
     colors = np.clip(colors, 0.0, 1.0)
 
     fig = plt.figure(figsize=(8, 8))
