@@ -60,12 +60,12 @@ class BrillouinZone2D:
         coords, _ = lattice.reciprocal_divmod(candidates)
         first_bz = np.logical_and(coords[:,0]==0, coords[:,1]==0)
 
-        self.sampled_momentums = candidates[first_bz]
-        self.sampled_coords = sample_coords[first_bz]
+        self.k_points = candidates[first_bz]
+        self.k_coords = sample_coords[first_bz]
         self.n_samples = np.sum(first_bz)
 
         # maps
-        self.idx_from_coord = {(n1, n2) : idx for idx, (n1, n2) in enumerate(self.sampled_coords)}
+        self.idx_from_coord = {(n1, n2) : idx for idx, (n1, n2) in enumerate(self.k_coords)}
 
         # look up tables
         N_s = self.n_samples
@@ -89,12 +89,16 @@ class BrillouinZone2D:
         """alias for n_samples"""
         return self.n_samples
 
+    @property
+    def reciprocal_lattice(self):
+        return self.lattice.reciprocal()
+    
     def __iter__(self):
         for idx in range(self.n_samples):
-            yield self.sampled_momentums[idx]
+            yield self.k_points[idx]
 
     def __getitem__(self, idx):
-        return self.sampled_momentums[idx]
+        return self.k_points[idx]
 
     def fold_coord(self, coord):
         pos = self.bz_sample_lattice.pos_from_coord(coord)
@@ -108,14 +112,14 @@ class BrillouinZone2D:
         return (new1, new2)
 
     def _idx_neg(self, idx):
-        coord = self.sampled_coords[idx]
+        coord = self.k_coords[idx]
         neg_coord = tuple(-x for x in coord)
         folded_coord = self.fold_coord(neg_coord)
         return self.idx_from_coord[folded_coord]
 
     def _idx_sum(self, idx1, idx2):
-        coord1 = self.sampled_coords[idx1]
-        coord2 = self.sampled_coords[idx2]
+        coord1 = self.k_coords[idx1]
+        coord2 = self.k_coords[idx2]
         sum_coord = tuple(x + y for x, y in zip(coord1, coord2))
         folded_coord = self.fold_coord(sum_coord)
         return self.idx_from_coord[folded_coord]
@@ -274,7 +278,7 @@ def test2():
     # plots
 
     # First BZ Boundary:
-    sampled_momentums = bz.sampled_momentums
+    sampled_momentums = bz.k_points
     R = 3 * np.linalg.norm(t1)
     thetas = np.linspace(np.pi / 2, 5 * np.pi / 2, 7)
     hexagon_x = R * np.cos(thetas)

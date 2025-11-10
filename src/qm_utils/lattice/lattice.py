@@ -57,7 +57,21 @@ class Lattice2D:
     @property
     def lattice_vectors(self):
         return self._lattice_vectors
+    
+    @property
+    def a1(self):
+        return self._lattice_vectors[0]
+    
+    @property
+    def a2(self):
+        return self._lattice_vectors[1]
 
+    @property
+    def unit_cell_area(self):
+        a1 = self._lattice_vectors[0]
+        a2 = self._lattice_vectors[1]
+        return np.abs(a1[0] * a2[1] - a1[1] * a2[0])
+    
     @property
     def ndim(self):
         return self._ndim
@@ -192,7 +206,7 @@ class Lattice2D:
     def reciprocal(self):
         return Lattice2D(self.reciprocal_lattice_vectors)
 
-    def get_points(self, xgrid, ygrid, flatten=True):
+    def get_points(self, xgrid, ygrid, *, flatten):
         a1, a2 = self.lattice_vectors
         points = xgrid[..., None] * a1[None, None, :] + ygrid[..., None] * a2[None, None, :]
         if flatten:
@@ -214,7 +228,7 @@ if __name__ == "__main__":
     xx = np.linspace(-N, N, 2 * N + 1)
     yy = np.linspace(-N, N, 2 * N + 1)
     mgrid = np.meshgrid(xx, yy, sparse=True)
-    points = tri_lattice.get_points(*mgrid)
+    points = tri_lattice.get_points(*mgrid, flatten=True)
 
     A = tri_lattice.lattice_vectors
     t1 = (2 * A[0] + A[1]) / 2

@@ -3,10 +3,9 @@ import jax
 import jax.numpy as jnp
 import netket as nk
 from netket.utils import struct
+from einops import rearrange
 
-from ..lattice.brillouin_zone import BrillouinZone2D
-from .fermions_on_bz import SectorOnBZ, FermionsOnBZ
-
+from .qm_utils.lattice.brillouin_zone import BrillouinZone2D
 
 def sum_indices(initial, indices, sum_table):
     def scan_fn(carry, x):
@@ -28,11 +27,21 @@ class SectorConstraint(nk.hilbert.constraint.DiscreteHilbertConstraint):
         self.n_particles = n_particles
         self.zero_idx = zero_idx
         self.sum_table = sum_table
-
-    def __call__(self, x):
-        indices = jnp.nonzero(x, size=self.n_particles)[0]
+    
+    def _apply_single(self, x):
+        indices, = jnp.nonzero(x, size=self.n_particles)
         total_idx = sum_indices(self.zero_idx, indices, self.sum_table)
-        return total_idx == self.sector_idx
+        return (total_idx == self.sector_idx)
+
+    @jax.jit
+    def __call__(self, x):
+        if x.ndim == 1:
+            return self._apply_single(x)
+        else:
+            batch_shape = x.shape[:-1]
+            x_flat = rearrange(x, "... n -> (...) n")
+            results_flat = jax.vmap(self._apply_single)(x_flat)
+            return results_flat.reshape(batch_shape)
     
     def __hash__(self):
         return hash(("SectorConstraint", self.sector_idx, self.n_particles))
