@@ -1,23 +1,27 @@
-from dataclasses import dataclass
-
+# from dataclasses import dataclass
+from typing import overload, Optional, Union
 import numpy as np
+import warnings
 
 from einops import einsum, rearrange, pack, unpack
 
-@dataclass
-class LatticeSite:
-    """Dataclass for single lattice site
+
+# @dataclass
+# class LatticeSite:
+#     """Dataclass for single lattice site
     
-    Attributes:
-        id (int): integer ID of this site
-        position (np.ndarray): real-space position of this site
-        basis_coord (np.ndarray): basis coordinates of this site 
-    """
+#     Attributes:
+#         id (int): integer ID of this site
+#         position (np.ndarray): real-space position of this site
+#         basis_coord (np.ndarray): basis coordinates of this site 
+#     """
 
-    id: int
-    position: np.ndarray
-    basis_coord: np.ndarray
+#     id: int
+#     position: np.ndarray
+#     basis_coord: np.ndarray
 
+def _split_ij(coords: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    return coords[..., 0], coords[..., 1]
 
 class Lattice2D:
     """A finite lattice
@@ -206,7 +210,28 @@ class Lattice2D:
     def reciprocal(self):
         return Lattice2D(self.reciprocal_lattice_vectors)
 
-    def get_points(self, xgrid, ygrid, *, flatten):
+    @overload
+    def get_points(self, coords: np.ndarray) -> np.ndarray: ...
+
+    # Case 2: 인자가 2개인 경우 (flatten은 '*' 뒤에 있어 키워드 전용으로 강제됨)
+    @overload
+    def get_points(self, xgrid: np.ndarray, ygrid: np.ndarray, *, flatten: bool = False) -> np.ndarray: ...
+    
+    def get_points(self, arg1: np.ndarray, arg2: Union[np.ndarray, bool, None] = None, *, flatten: Optional[bool] = None):
+        xgrid: np.ndarray
+        ygrid: np.ndarray
+        final_flatten: bool = False
+        
+        if isinstance(arg2, np.ndarray):
+            xgrid, ygrid = arg1, arg2
+            # 이 경우 flatten은 반드시 키워드 인자로 들어와야 함
+            if flatten is not None:
+                final_flatten = flatten
+        else:
+            xgrid, ygrid = _split_ij(arg1)
+            if arg2 is not None or flatten is not None:
+                warnings.warn("Single input detected: 'flatten' argument is ignored.", UserWarning)
+            
         a1, a2 = self.lattice_vectors
         points = xgrid[..., None] * a1[None, None, :] + ygrid[..., None] * a2[None, None, :]
         if flatten:
