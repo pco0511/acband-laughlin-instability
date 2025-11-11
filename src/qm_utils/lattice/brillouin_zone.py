@@ -25,8 +25,8 @@ class BrillouinZone2D:
         self.lattice = lattice
         self.bz_sample_lattice = bz_sample_lattice
 
-        b1, b2 = lattice.reciprocal_lattice_vectors
-        t1, t2 = lattice.lattice_vectors
+        b1, b2 = self.lattice.reciprocal_lattice_vectors
+        t1, t2 = self.bz_sample_lattice.lattice_vectors
 
         (n11, n12), offset1 = bz_sample_lattice.divmod(b1)
         (n21, n22), offset2 = bz_sample_lattice.divmod(b2)
