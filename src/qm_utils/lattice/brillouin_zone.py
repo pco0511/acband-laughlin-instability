@@ -102,26 +102,27 @@ class BrillouinZone2D:
 
     def fold_coord(self, coord):
         pos = self.bz_sample_lattice.pos_from_coord(coord)
-        (c1, c2), _ = self.lattice.reciprocal_divmod(pos)
+        g, _ = self.lattice.reciprocal_divmod(pos)
         # G = c1 b1 + c2 b2 = (c1 n11 + c2 n21) t1 + (c1 n12 + c2 n22) t2
-
+        
+        c1, c2 = g
         m1, m2 = coord
         new1 = m1 - (c1 * self.n11 + c2 * self.n21)
         new2 = m2 - (c1 * self.n12 + c2 * self.n22)
 
-        return (new1, new2)
+        return (new1, new2), g
 
     def _idx_neg(self, idx):
         coord = self.k_coords[idx]
         neg_coord = tuple(-x for x in coord)
-        folded_coord = self.fold_coord(neg_coord)
+        folded_coord, _ = self.fold_coord(neg_coord)
         return self.idx_from_coord[folded_coord]
 
     def _idx_sum(self, idx1, idx2):
         coord1 = self.k_coords[idx1]
         coord2 = self.k_coords[idx2]
         sum_coord = tuple(x + y for x, y in zip(coord1, coord2))
-        folded_coord = self.fold_coord(sum_coord)
+        folded_coord, _ = self.fold_coord(sum_coord)
         return self.idx_from_coord[folded_coord]
     
     def zero(self):
