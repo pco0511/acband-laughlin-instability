@@ -145,7 +145,8 @@ def acband_form_factors(
     ])
     recip_lattice = bz.reciprocal_lattice
     
-    Lambda_k_plus_G_p = np.zeros((G_coords.shape[0], bz.N_s, bz.N_s), dtype=np.complex128)
+    Lambda_k_plus_G_p = np.zeros((G_coords.shape[0], bz.N_s, bz.N_s), dtype=np.complex128)# shape: (7, N_s, N_s)
+
     g_idx_left_center = 1
     g_idx_right_center = -2
     for iG, G in enumerate(G_coords):
@@ -162,7 +163,7 @@ def acband_form_factors(
         )
         Lambda_k_plus_G_p[iG, :, :] = N_k * N_p * unnormed
     
-    return Lambda_k_plus_G_p  # shape: (7, N_s, N_s)
+    return G_coords, Lambda_k_plus_G_p  
 
 if __name__ == "__main__":
     from functools import partial
