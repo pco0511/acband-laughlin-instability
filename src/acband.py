@@ -150,8 +150,8 @@ def acband_form_factors(
     g_idx_left_center = 1
     g_idx_right_center = -2
     for iG, G in enumerate(G_coords):
-        g_plus_G_slice_1 = slice(g_idx_left_center + G[0], g_idx_right_center + G[0] + 1)
-        g_plus_G_slice_2 = slice(g_idx_left_center + G[1], g_idx_right_center + G[1] + 1)
+        g_plus_G_slice_1 = slice(g_idx_left_center + G[0], g_idx_right_center + G[0])
+        g_plus_G_slice_2 = slice(g_idx_left_center + G[1], g_idx_right_center + G[1])
         
         ff_k_p_g_plus_G = ff_k_p_g[:, :, g_plus_G_slice_1, g_plus_G_slice_2]  # shape: (N_s, N_s, res, res)
         N_k = normalizations[:, None]
@@ -227,7 +227,7 @@ if __name__ == "__main__":
     
     # N = 28 test
     start = time.time()
-    ac_ff_28 = acband_form_factors(
+    _, ac_ff_28 = acband_form_factors(
         bz_28,
         lB,
         K_func,
