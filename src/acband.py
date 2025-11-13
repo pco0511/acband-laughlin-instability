@@ -100,7 +100,7 @@ def acband_normalization_constants(
     norm_invs2 = einsum(k_indeps, k_deps, "m n, k m n -> k")  # shape: (N_s,)
     
     assert np.all(np.abs(np.imag(norm_invs2)) < eps), f"Normalization constants have significant imaginary parts"
-    assert np.all(np.real(norm_invs2) > -eps), f"Normalization constants have non-positive real parts: {np.min(np.real(norm_invs2))}"
+    assert np.all(np.real(norm_invs2) > eps), f"Normalization constants have non-positive real parts: {np.min(np.real(norm_invs2))}"
     
     return 1.0 / np.sqrt(np.abs(norm_invs2))
 

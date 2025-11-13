@@ -42,7 +42,6 @@ lB = ((sqrt3 / (4 * np.pi)) ** 0.5) * a_M
 resolution = 1022
 V1 = 1.0
 v1 = 3 * V1 * (a_M ** 4) / (4 * np.pi)
-K = 0.8
 
 bz = {}
 
@@ -109,11 +108,11 @@ def V(q):
 # def V(q):
 #     return 
     
-# K_func_args = (K, b1, b2, b3)
-# K_func = partial(K_func1, args=K_func_args)
+K_func_args = (K, b1, b2, b3)
+K_func = partial(K_func1, args=K_func_args)
 
-K_func_args = (4, 0.25, 50, a1, a2)
-K_func = partial(K_func2, args=K_func_args)
+# K_func_args = (3, 0.25, 20, a1, a2)
+# K_func = partial(K_func2, args=K_func_args)
 
 start = time.time()
 G_coords, ac_ff = acband_form_factors(
