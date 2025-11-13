@@ -160,7 +160,6 @@ def acband_form_factors(
     ])
     
     Lambda_k_plus_G_p = np.zeros((G_coords.shape[0], bz.N_s, bz.N_s), dtype=np.complex128)# shape: (7, N_s, N_s)
-
     for iG, G in enumerate(G_coords):
         start1 = 1 + G[0]
         stop1 = start1 + res
@@ -175,7 +174,7 @@ def acband_form_factors(
         N_p = normalizations[None, :]
         unnormed = einsum(
             ff_k_p_g_plus_G,
-            wg[g_plus_G_slice_1, g_plus_G_slice_2],
+            wg[1:-1, 1:-1],
             "k p m n, m n -> k p"
         )
         Lambda_k_plus_G_p[iG, :, :] = N_k * N_p * unnormed
