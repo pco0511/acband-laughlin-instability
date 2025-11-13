@@ -16,7 +16,7 @@ from netket.experimental.operator import ParticleNumberConservingFermioperator2n
 from src.qm_utils.lattice.lattice import Lattice2D
 from src.qm_utils.lattice.brillouin_zone import BrillouinZone2D
 from src.netket_compat import get_sector_constraints
-from src.acband import acband_form_factors, K_func1
+from src.acband import acband_form_factors, K_func1, K_func2
 
 
 
@@ -104,9 +104,16 @@ for k_index, sector in enumerate(hilbs):
 A = N_s * lattice.unit_cell_area
 
 def V(q):
-    return -v1 * np.linalg.norm(q) ** 2
+    return -v1 * np.linalg.norm(q, axis=-1) ** 2
+
+# def V(q):
+#     return 
     
-K_func = partial(K_func1, args=(K, b1, b2, b3))
+# K_func_args = (K, b1, b2, b3)
+# K_func = partial(K_func1, args=K_func_args)
+
+K_func_args = (4, 0.25, 50, a1, a2)
+K_func = partial(K_func2, args=K_func_args)
 
 start = time.time()
 G_coords, ac_ff = acband_form_factors(

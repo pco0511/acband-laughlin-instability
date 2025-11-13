@@ -26,13 +26,28 @@ def K_func1(
 
 def K_func2(
         x: np.ndarray,
-        args
+        args: tuple[int, float, int, np.ndarray, np.ndarray]
     ) -> np.ndarray:
     # solenoid
-    pass
+    m, sigma, N, a1, a2 = args
+    ns = np.linspace(-N, N, 2 * N + 1)
+    n1 = ns[:, None, None]
+    n2 = ns[None, :, None]
+    lattice_points = n1 * a1[None, None, :] + n2 * a2[None, None, :]
+    flatten_lattice_points = rearrange(lattice_points, "n1 n2 d -> (n1 n2) d")
+    
+    x_batch_shape = x.shape[:-1]
+    x_flatten = rearrange(x, "... d -> (...) d")
+    diffs = x_flatten[:, None, :] - flatten_lattice_points[None, :, :]
+    dists_square = np.sum(diffs ** 2, axis=-1) / (sigma ** 2)
+    dists = np.sqrt(dists_square) 
 
+    chis = np.where(dists < 1, dists_square - (1/2), np.log(dists))
+    k_vals_flatten = (1 / m) * np.sum(chis, axis=1)
+    k_vals = np.reshape(k_vals_flatten, shape=x_batch_shape)
+    return k_vals
 
-def K_fourier_components(
+def wg_fourier_components(
     K_func,
     lattice: Lattice2D, 
     resolution: int,
@@ -121,10 +136,10 @@ def acband_form_factors(
     bz: BrillouinZone2D,
     lB: float,
     K_func: Callable[[np.ndarray], np.ndarray],
-    res: np.ndarray, # 2^n - 2 is preferred
+    res: np.ndarray, # 2^n - 2 is preferred,
     eps: float = 1e-10
 ) -> np.ndarray:
-    g_coords, wg = K_fourier_components(
+    g_coords, wg = wg_fourier_components(
         K_func, bz.lattice, res + 2, flatten=False
     ) # grid is extended by +-1 in each direction
     # shape: (res + 2, res + 2, 2), (res + 2, res + 2)
@@ -143,7 +158,6 @@ def acband_form_factors(
         [-1, -1],
         [0, -1],
     ])
-    recip_lattice = bz.reciprocal_lattice
     
     Lambda_k_plus_G_p = np.zeros((G_coords.shape[0], bz.N_s, bz.N_s), dtype=np.complex128)# shape: (7, N_s, N_s)
 
@@ -209,7 +223,7 @@ if __name__ == "__main__":
     K_func = partial(K_func1, args=(0.8, b1, b2, b3))
     
     # normalization constants test
-    g_coords, wg = K_fourier_components(
+    g_coords, wg = wg_fourier_components(
         K_func, bz_27.lattice, resolution, flatten=False
     )
     normalizations = acband_normalization_constants(
