@@ -1,23 +1,43 @@
+import argparse
+from datetime import datetime
+from functools import partial
 import itertools
 import time
-from functools import partial
+import os
 
 import numpy as np
 import matplotlib.pyplot as plt
 
 import netket as nk
+from netket.operator.fermion import destroy as c
+from netket.operator.fermion import create as cdag
+from netket.experimental.operator import ParticleNumberConservingFermioperator2nd
 
 from src.qm_utils.lattice.lattice import Lattice2D
 from src.qm_utils.lattice.brillouin_zone import BrillouinZone2D
 from src.netket_compat import get_sector_constraints
 from src.acband import acband_form_factors, K_func1
 
-sqrt3 = 3.0 ** 0.5
-N_s = 27
-N_f = 18
 
-lB = 1.0
-a_M = (((4 * np.pi) / sqrt3) ** 0.5) * lB
+
+parser = argparse.ArgumentParser(description="ED parameters")
+parser.add_argument("--n_sites", "-N", type=int, choices=[25, 27, 28], default=27, help="Number of lattice sites (N_s); must be one of {25, 27, 28}")
+parser.add_argument("--n_fermions", "-F", type=int, default=18, help="Number of fermions (N_f)")
+parser.add_argument("--K", type=float, default=0.8, help="K parameter for K_func")
+args = parser.parse_args()
+
+N_s = args.n_sites
+N_f = args.n_fermions
+K = args.K
+
+sqrt3 = 3.0 ** 0.5
+
+# lB = 1.0
+# a_M = (((4 * np.pi) / sqrt3) ** 0.5) * lB
+a_M = 1
+lB = ((sqrt3 / (4 * np.pi)) ** 0.5) * a_M
+
+
 # resolution = 254
 resolution = 1022
 V1 = 1.0
@@ -101,13 +121,6 @@ end = time.time()
 print(f"N_s = {N_s} AC band form factors computed in {end - start:.2f} seconds")
 print(f"{ac_ff.shape=}")
 
-from netket.operator.fermion import destroy as c
-from netket.operator.fermion import create as cdag
-from netket.experimental.operator import ParticleNumberConservingFermioperator2nd
-import os
-from datetime import datetime
-
-
 hamiltonians = []
 for sector_index, sector in enumerate(hilbs):
     print(f"Constructing Hamiltonian for sector {sector_index}...")
@@ -170,8 +183,8 @@ plt.figure(figsize=(8, 6))
 plt.scatter(k_coms_flatten, energies_flatten, color='red')
 plt.xlabel(r'$|\mathbf{k}_{\mathrm{COM}}|$')
 plt.ylabel('Energy')
-plt.title(f'ED Spectrum (N={N_s})')
+plt.title(f'ED Spectrum ($N={N_f}$, $N_S={N_s}$)')
 os.makedirs('figs/main', exist_ok=True)
 ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-plt.savefig(f'figs/main/ed_spectrum_{ts}.png', dpi=300)
+plt.savefig(f'figs/main/ed_spectrum_{N_f}_{N_s}_{K:.3f}_{ts}.png', dpi=300)
 plt.close()

@@ -46,7 +46,7 @@ def K_fourier_components(
     samples = lattice.get_points(*mgrid, flatten=False)
     K_vals = K_func(samples)
     
-    wg_raw = np.fft.fft2(K_vals) / (resolution ** 2)
+    wg_raw = np.fft.fft2(np.exp(-2 * K_vals)) / (resolution ** 2)
     wg = np.fft.fftshift(wg_raw)
     
     m_vals = np.fft.fftshift(np.fft.fftfreq(resolution) * resolution).astype(int)
@@ -84,8 +84,8 @@ def acband_normalization_constants(
     k_deps = np.exp(1j * lB2 * k_cross_g) # shape: (N_s, res, res)
     norm_invs2 = einsum(k_indeps, k_deps, "m n, k m n -> k")  # shape: (N_s,)
     
-    # assert np.all(np.abs(np.imag(norm_invs2)) < eps), f"Normalization constants have significant imaginary parts"
-    # assert np.all(np.real(norm_invs2) > -eps), f"Normalization constants have non-positive real parts: {np.min(np.real(norm_invs2))}"
+    assert np.all(np.abs(np.imag(norm_invs2)) < eps), f"Normalization constants have significant imaginary parts"
+    assert np.all(np.real(norm_invs2) > -eps), f"Normalization constants have non-positive real parts: {np.min(np.real(norm_invs2))}"
     
     return 1.0 / np.sqrt(np.abs(norm_invs2))
 
@@ -122,7 +122,7 @@ def acband_form_factors(
     lB: float,
     K_func: Callable[[np.ndarray], np.ndarray],
     res: np.ndarray, # 2^n - 2 is preferred
-    eps: float = 1e-5
+    eps: float = 1e-10
 ) -> np.ndarray:
     g_coords, wg = K_fourier_components(
         K_func, bz.lattice, res + 2, flatten=False
