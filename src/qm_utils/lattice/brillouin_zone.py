@@ -1,8 +1,6 @@
 import itertools
 import random
 
-
-
 import numpy as np
 from einops import rearrange, pack
 
@@ -25,15 +23,17 @@ class BrillouinZone2D:
         self.lattice = lattice
         self.bz_sample_lattice = bz_sample_lattice
 
+        # b1 = n11 t1 + n12 t2
+        # b2 = n21 t1 + n22 t2
         b1, b2 = self.lattice.reciprocal_lattice_vectors
         t1, t2 = self.bz_sample_lattice.lattice_vectors
 
         (n11, n12), offset1 = bz_sample_lattice.divmod(b1)
         (n21, n22), offset2 = bz_sample_lattice.divmod(b2)
         
-        assert np.linalg.norm(offset1) < eps
-        assert np.linalg.norm(offset2) < eps
-
+        if np.linalg.norm(offset1) >= eps or np.linalg.norm(offset2) >= eps:
+            raise ValueError("Sampling lattice is not a superlattice of the reciprocal lattice of given lattice.")
+        
         self.b1 = b1
         self.b2 = b2
         self.t1 = t1

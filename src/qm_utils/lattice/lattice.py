@@ -71,6 +71,14 @@ class Lattice2D:
         return self._lattice_vectors[1]
 
     @property
+    def b1(self):
+        return self._reciprocal_lattice_vectors[0]
+    
+    @property
+    def b2(self):
+        return self._reciprocal_lattice_vectors[1]
+
+    @property
     def unit_cell_area(self):
         a1 = self._lattice_vectors[0]
         a2 = self._lattice_vectors[1]
@@ -233,7 +241,7 @@ class Lattice2D:
                 warnings.warn("Single input detected: 'flatten' argument is ignored.", UserWarning)
             
         a1, a2 = self.lattice_vectors
-        points = xgrid[..., None] * a1[None, None, :] + ygrid[..., None] * a2[None, None, :]
+        points = xgrid[..., None] * a1 + ygrid[..., None] * a2
         if flatten:
             return rearrange(points, "x y a -> (x y) a")
         else:

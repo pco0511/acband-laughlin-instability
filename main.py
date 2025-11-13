@@ -32,10 +32,10 @@ K = args.K
 
 sqrt3 = 3.0 ** 0.5
 
-# lB = 1.0
-# a_M = (((4 * np.pi) / sqrt3) ** 0.5) * lB
-a_M = 1
-lB = ((sqrt3 / (4 * np.pi)) ** 0.5) * a_M
+lB = 1.0
+a_M = (((4 * np.pi) / sqrt3) ** 0.5) * lB
+# a_M = 1
+# lB = ((sqrt3 / (4 * np.pi)) ** 0.5) * a_M
 
 
 # resolution = 254
@@ -146,8 +146,8 @@ for sector_index, sector in enumerate(hilbs):
         k1_f = bz_N_s.idx_from_coord[k1_f_folded]
         k2_f = bz_N_s.idx_from_coord[k2_f_folded]
 
-        g1_idx = G_idx_map[tuple(g1.tolist())]
-        g2_idx = G_idx_map[tuple(g2.tolist())]
+        g1_idx = G_idx_map[tuple((-g1).tolist())]
+        g2_idx = G_idx_map[tuple((-g2).tolist())]
         
         Lambda1 = ac_ff[g1_idx, k1_f, k1]
         Lambda2 = ac_ff[g2_idx, k2_f, k2]
