@@ -168,7 +168,7 @@ com_momentums = []
 for k_index, (sector, H) in enumerate(zip(hilbs, hamiltonians)):
     print(f"Diagonalizing sector {k_index} with dimension {sector.n_states}...")
     start = time.time()
-    evals = nk.exact.lanczos_ed(H, k=5)
+    evals = nk.exact.lanczos_ed(H, k=30)
     end = time.time()
     print(f"  Diagonalized in {end - start:.2f} seconds")
     spectrums.append(evals)
