@@ -61,7 +61,7 @@ def wg_fourier_components(
     samples = lattice.get_points(*mgrid, flatten=False)
     K_vals = K_func(samples)
     
-    wg_raw = np.fft.fft2(np.exp(-2 * K_vals)) / (resolution ** 2)
+    wg_raw = np.fft.ifft2(np.exp(-2 * K_vals))
     wg = np.fft.fftshift(wg_raw)
     
     m_vals = np.fft.fftshift(np.fft.fftfreq(resolution) * resolution).astype(int)
@@ -139,7 +139,7 @@ def acband_form_factors(
     res: np.ndarray, # 2^n - 2 is preferred,
     eps: float = 1e-10
 ) -> np.ndarray:
-    # compute \Lambda_{k, p} with k = k' + g1, p = p' + g2, and G = g2 - g1
+    # compute \Lambda^{k, p}_G
     g_coords, wg = wg_fourier_components(
         K_func, bz.lattice, res + 2, flatten=False
     ) # grid is extended by +-1 in each direction
@@ -160,7 +160,7 @@ def acband_form_factors(
         [0, -1],
     ])
     
-    Lambda_k_p = np.zeros((G_coords.shape[0], bz.N_s, bz.N_s), dtype=np.complex128)# shape: (7, N_s, N_s)
+    Lambda_k_p = np.zeros((G_coords.shape[0], bz.N_s, bz.N_s), dtype=np.complex128) # shape: (7, N_s, N_s)
     for iG, G in enumerate(G_coords):
         start1 = 1 + G[0]
         stop1 = start1 + res
@@ -180,7 +180,7 @@ def acband_form_factors(
         )
         Lambda_k_p[iG, :, :] = N_k * N_p * unnormed
     
-    return G_coords, Lambda_k_p  
+    return G_coords, Lambda_k_p
 
 if __name__ == "__main__":
     from functools import partial

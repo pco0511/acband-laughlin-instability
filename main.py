@@ -43,7 +43,7 @@ resolution = 1022
 V1 = 1.0
 v1 = 3 * V1 * (a_M ** 4) / (4 * np.pi)
 
-bz = {}
+bz: dict[int, BrillouinZone2D] = {}
 
 e1 = np.array([1, 0])
 e2 = np.array([0, 1])
@@ -131,34 +131,63 @@ hamiltonians = []
 for sector_index, sector in enumerate(hilbs):
     print(f"Constructing Hamiltonian for sector {sector_index}...")
     H = 0.0
-    
-    for k1, k2, p in itertools.product(range(N_s), repeat=3):
-        k1_coords = bz_N_s.k_coords[k1]
-        k2_coords = bz_N_s.k_coords[k2]
-        p_coords = bz_N_s.k_coords[p]
+    for k, p, q in itertools.product(range(N_s), repeat=3):
+        k1 = bz_N_s.add(k, q) # k + q
+        k2 = bz_N_s.sub(p, q) # p - q
+        k3 = p
+        k4 = k
         
-        k1_f_coords = k1_coords + p_coords
-        k2_f_coords = k2_coords - p_coords
-        
-        k1_f_folded, g1 = bz_N_s.fold_coord(k1_f_coords)
-        k2_f_folded, g2 = bz_N_s.fold_coord(k2_f_coords)
-        
-        k1_f = bz_N_s.idx_from_coord[k1_f_folded]
-        k2_f = bz_N_s.idx_from_coord[k2_f_folded]
+        k1_coord = bz_N_s.coords[k1]
+        k2_coord = bz_N_s.coords[k2]
+        k3_coord = bz_N_s.coords[k3]
+        k4_coord = bz_N_s.coords[k4]
+        q_coord = bz_N_s.coords[q]
+        q_vec = bz_N_s.k_points[q]
 
-        g1_idx = G_idx_map[tuple((-g1).tolist())]
-        g2_idx = G_idx_map[tuple((-g2).tolist())]
+        coeff = 1.0 + 0.0j
         
-        Lambda1 = ac_ff[g1_idx, k1_f, k1]
-        Lambda2 = ac_ff[g2_idx, k2_f, k2]
+        V_q = V(q_vec)
         
-        p_vec = bz_N_s.k_points[p]
-        V_p = V(p_vec)
-        c_dag_k1_f = cdag(sector, k1_f)
-        c_dag_k2_f = cdag(sector, k2_f)
-        c_k2 = c(sector, k2)
-        c_k1 = c(sector, k1)
-        H += complex((1 / (2 * A)) * V_p * Lambda1 * Lambda2) * (c_dag_k1_f @ c_dag_k2_f @ c_k2 @ c_k1)
+        _, G1 = bz_N_s.fold_coord(k4_coord - k1_coord + q_coord)
+        _, G2 = bz_N_s.fold_coord(k3_coord - k2_coord - q_coord)
+        
+        Lambda_1 = ac_ff[G1, k1, k4]
+        Lambda_2 = ac_ff[G2, k2, k3]
+
+        coeff = (1 / (2 * A)) * V_q * (A * Lambda_1) * (A * Lambda_2)
+
+        c_dag_k1 = cdag(sector, k1)
+        c_dag_k2 = cdag(sector, k2)
+        c_k3 = c(sector, k3)
+        c_k4 = c(sector, k4)
+
+        H += complex(coeff) * (c_dag_k1 @ c_dag_k2 @ c_k3 @ c_k4)
+        # k1_coords = bz_N_s.k_coords[k1]
+        # k2_coords = bz_N_s.k_coords[k2]
+        # p_coords = bz_N_s.k_coords[p]
+        
+        # k1_f_coords = k1_coords + p_coords
+        # k2_f_coords = k2_coords - p_coords
+        
+        # k1_f_folded, g1 = bz_N_s.fold_coord(k1_f_coords)
+        # k2_f_folded, g2 = bz_N_s.fold_coord(k2_f_coords)
+        
+        # k1_f = bz_N_s.idx_from_coord[k1_f_folded]
+        # k2_f = bz_N_s.idx_from_coord[k2_f_folded]
+
+        # g1_idx = G_idx_map[tuple((-g1).tolist())]
+        # g2_idx = G_idx_map[tuple((-g2).tolist())]
+        
+        # Lambda1 = ac_ff[g1_idx, k1_f, k1]
+        # Lambda2 = ac_ff[g2_idx, k2_f, k2]
+        
+        # p_vec = bz_N_s.k_points[p]
+        # V_p = V(p_vec)
+        # c_dag_k1_f = cdag(sector, k1_f)
+        # c_dag_k2_f = cdag(sector, k2_f)
+        # c_k2 = c(sector, k2)
+        # c_k1 = c(sector, k1)
+        # H += complex((1 / (2 * A)) * V_p * Lambda1 * Lambda2) * (c_dag_k1_f @ c_dag_k2_f @ c_k2 @ c_k1)
     H = ParticleNumberConservingFermioperator2nd.from_fermionoperator2nd(H)
     hamiltonians.append(H)
 
