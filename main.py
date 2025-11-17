@@ -4,6 +4,7 @@ from functools import partial
 import itertools
 import time
 import os
+import pickle
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -38,8 +39,9 @@ a_M = (((4 * np.pi) / sqrt3) ** 0.5) * lB
 # lB = ((sqrt3 / (4 * np.pi)) ** 0.5) * a_M
 
 
-# resolution = 254
-resolution = 1022
+# fourier_resolution = 128
+fourier_resolution = 256
+G_radius = 64
 V1 = 1.0
 v1 = 3 * V1 * (a_M ** 4) / (4 * np.pi)
 
@@ -50,6 +52,7 @@ e2 = np.array([0, 1])
 a1 = a_M * e2
 a2 = a_M * ((-sqrt3 / 2) * e1 + (1 / 2) * e2)
 lattice = Lattice2D(np.stack([a1, a2]))
+recip_lattice = lattice.reciprocal()
 b = (4 * np.pi) / (a_M * sqrt3)
 b1, b2 = lattice.reciprocal_lattice_vectors
 b3 = -(b1 + b2)
@@ -104,9 +107,7 @@ A = N_s * lattice.unit_cell_area
 
 def V(q):
     return -v1 * np.linalg.norm(q, axis=-1) ** 2
-
-# def V(q):
-#     return 
+ 
     
 K_func_args = (K, b1, b2, b3)
 K_func = partial(K_func1, args=K_func_args)
@@ -119,10 +120,16 @@ G_coords, ac_ff = acband_form_factors(
     bz[N_s],
     lB,
     K_func,
-    resolution
+    fourier_resolution,
+    G_radius=G_radius,
+    pbar=True
 )
-G_idx_map = {tuple(G.tolist()): i for i, G in enumerate(G_coords)}
 end = time.time()
+
+G_vecs = recip_lattice.get_points(G_coords)
+start_idx = 1
+end_idx = 2 * G_radius
+G_vecs_slice = G_vecs[start_idx:end_idx, start_idx:end_idx]
 
 print(f"N_s = {N_s} AC band form factors computed in {end - start:.2f} seconds")
 print(f"{ac_ff.shape=}")
@@ -132,29 +139,41 @@ for sector_index, sector in enumerate(hilbs):
     print(f"Constructing Hamiltonian for sector {sector_index}...")
     H = 0.0
     for k, p, q in itertools.product(range(N_s), repeat=3):
-        k1 = bz_N_s.add(k, q) # k + q
+        k1 = bz_N_s.sum(k, q) # k + q
         k2 = bz_N_s.sub(p, q) # p - q
         k3 = p
         k4 = k
         
-        k1_coord = bz_N_s.coords[k1]
-        k2_coord = bz_N_s.coords[k2]
-        k3_coord = bz_N_s.coords[k3]
-        k4_coord = bz_N_s.coords[k4]
-        q_coord = bz_N_s.coords[q]
+        k1_coord = bz_N_s.k_coords[k1]
+        k2_coord = bz_N_s.k_coords[k2]
+        k3_coord = bz_N_s.k_coords[k3]
+        k4_coord = bz_N_s.k_coords[k4]
+        q_coord = bz_N_s.k_coords[q]
         q_vec = bz_N_s.k_points[q]
 
-        coeff = 1.0 + 0.0j
-        
-        V_q = V(q_vec)
-        
-        _, G1 = bz_N_s.fold_coord(k4_coord - k1_coord + q_coord)
-        _, G2 = bz_N_s.fold_coord(k3_coord - k2_coord - q_coord)
-        
-        Lambda_1 = ac_ff[G1, k1, k4]
-        Lambda_2 = ac_ff[G2, k2, k3]
+        _, G1_coord = bz_N_s.fold_coord(k4_coord + q_coord) # k1_coord + G1 = k4 + q
+        _, G2_coord = bz_N_s.fold_coord(k3_coord - q_coord) # k2_coord + G2 = k3 - q
 
-        coeff = (1 / (2 * A)) * V_q * (A * Lambda_1) * (A * Lambda_2)
+        q_vec_shifted_grid = G_vecs_slice + q_vec
+        V_grid = V(q_vec_shifted_grid)
+        
+        # for Lambda 1:
+        l1_start_x = start_idx - G1_coord[0]
+        l1_end_x   = end_idx   - G1_coord[0]
+        l1_start_y = start_idx - G1_coord[1]
+        l1_end_y   = end_idx   - G1_coord[1]
+
+        # for Lambda 2:
+        l2_start_x = start_idx - G2_coord[0]
+        l2_end_x   = end_idx   - G2_coord[0]
+        l2_start_y = start_idx - G2_coord[1]
+        l2_end_y   = end_idx   - G2_coord[1]
+
+        Lambda_1_grid = ac_ff[l1_start_x:l1_end_x, l1_start_y:l1_end_y, k1, k4][::-1, ::-1]
+        Lambda_2_grid = ac_ff[l2_start_x:l2_end_x, l2_start_y:l2_end_y, k2, k3]
+
+        interaction_grid = V_grid * Lambda_1_grid * Lambda_2_grid
+        coeff = (1 / (2 * A)) * np.sum(interaction_grid)
 
         c_dag_k1 = cdag(sector, k1)
         c_dag_k2 = cdag(sector, k2)
@@ -162,51 +181,27 @@ for sector_index, sector in enumerate(hilbs):
         c_k4 = c(sector, k4)
 
         H += complex(coeff) * (c_dag_k1 @ c_dag_k2 @ c_k3 @ c_k4)
-        # k1_coords = bz_N_s.k_coords[k1]
-        # k2_coords = bz_N_s.k_coords[k2]
-        # p_coords = bz_N_s.k_coords[p]
-        
-        # k1_f_coords = k1_coords + p_coords
-        # k2_f_coords = k2_coords - p_coords
-        
-        # k1_f_folded, g1 = bz_N_s.fold_coord(k1_f_coords)
-        # k2_f_folded, g2 = bz_N_s.fold_coord(k2_f_coords)
-        
-        # k1_f = bz_N_s.idx_from_coord[k1_f_folded]
-        # k2_f = bz_N_s.idx_from_coord[k2_f_folded]
-
-        # g1_idx = G_idx_map[tuple((-g1).tolist())]
-        # g2_idx = G_idx_map[tuple((-g2).tolist())]
-        
-        # Lambda1 = ac_ff[g1_idx, k1_f, k1]
-        # Lambda2 = ac_ff[g2_idx, k2_f, k2]
-        
-        # p_vec = bz_N_s.k_points[p]
-        # V_p = V(p_vec)
-        # c_dag_k1_f = cdag(sector, k1_f)
-        # c_dag_k2_f = cdag(sector, k2_f)
-        # c_k2 = c(sector, k2)
-        # c_k1 = c(sector, k1)
-        # H += complex((1 / (2 * A)) * V_p * Lambda1 * Lambda2) * (c_dag_k1_f @ c_dag_k2_f @ c_k2 @ c_k1)
     H = ParticleNumberConservingFermioperator2nd.from_fermionoperator2nd(H)
     hamiltonians.append(H)
 
-spectrums = []
+eigenvalues = []
+eigenvectors = []
 com_momentums = []
 
 for k_index, (sector, H) in enumerate(zip(hilbs, hamiltonians)):
     print(f"Diagonalizing sector {k_index} with dimension {sector.n_states}...")
     start = time.time()
-    evals = nk.exact.lanczos_ed(H, k=30)
+    evals, evecs = nk.exact.lanczos_ed(H, k=10, compute_eigenvectors=True)
     end = time.time()
     print(f"  Diagonalized in {end - start:.2f} seconds")
-    spectrums.append(evals)
+    eigenvalues.append(evals)
+    eigenvectors.append(evecs)
     com_momentums.append(bz_N_s.k_points[k_index])
 
 k_coms_flatten = []
 energies_flatten = []
 
-for com_momentum, spectrum in zip(com_momentums, spectrums):
+for com_momentum, spectrum in zip(com_momentums, eigenvalues):
     k_coms_flatten.extend([np.linalg.norm(com_momentum)] * len(spectrum))
     energies_flatten.extend(spectrum.tolist())
     
@@ -215,7 +210,7 @@ energies_flatten = np.array(energies_flatten)
 energies_flatten -= np.min(energies_flatten)
 
 plt.figure(figsize=(8, 6))
-plt.scatter(k_coms_flatten, energies_flatten, color='red')
+plt.scatter(k_coms_flatten, energies_flatten, color='red', alpha=0.5)
 plt.xlabel(r'$|\mathbf{k}_{\mathrm{COM}}|$')
 plt.ylabel('Energy')
 plt.title(f'ED Spectrum ($N={N_f}$, $N_S={N_s}$)')
@@ -223,3 +218,21 @@ os.makedirs('figs/main', exist_ok=True)
 ts = datetime.now().strftime('%Y%m%d_%H%M%S')
 plt.savefig(f'figs/main/ed_spectrum_{N_f}_{N_s}_{K:.3f}_{ts}.png', dpi=300)
 plt.close()
+
+data_path = f'data/main/ed_spectrum_{N_f}_{N_s}_{K:.3f}_{ts}.pkl'
+os.makedirs('data/main', exist_ok=True)
+with open(data_path, 'wb') as f:
+    pickle.dump({
+        'k_coms': k_coms_flatten,
+        'energies': energies_flatten,
+        'N_f': N_f,
+        'N_s': N_s,
+        'K': K,
+        'fourier_resolution': fourier_resolution,
+        'G_radius': G_radius,
+        'a_M': a_M,
+        'lB': lB,
+        'com_momentums': com_momentums,
+        'eigenvalues': eigenvalues,
+        'eigenvectors': eigenvectors,
+    }, f)

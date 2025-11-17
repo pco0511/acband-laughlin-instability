@@ -1,10 +1,12 @@
+import itertools
 from typing import Callable
 
 import numpy as np
+
 from .qm_utils.lattice.lattice import Lattice2D
 from .qm_utils.lattice.brillouin_zone import BrillouinZone2D
 
-from einops import einsum, rearrange, reduce
+from einops import einsum, rearrange, pack
 
 
 def eta_factors(
@@ -136,51 +138,55 @@ def acband_form_factors(
     bz: BrillouinZone2D,
     lB: float,
     K_func: Callable[[np.ndarray], np.ndarray],
-    res: np.ndarray, # 2^n - 2 is preferred,
-    eps: float = 1e-10
+    fourier_resolution: int, # 2^n is preferred
+    G_radius: int,
+    pbar: bool=False,
+    eps: float=1e-10
 ) -> np.ndarray:
     # compute \Lambda^{k, p}_G
     g_coords, wg = wg_fourier_components(
-        K_func, bz.lattice, res + 2, flatten=False
-    ) # grid is extended by +-1 in each direction
-    # shape: (res + 2, res + 2, 2), (res + 2, res + 2)
+        K_func, bz.lattice, fourier_resolution, flatten=False
+    )
+    # shape: (res, res, 2), (res, res)
     normalizations = acband_normalization_constants(
         bz, lB, g_coords, wg, eps=eps
     ) # shape: (N_s,)
     ff_k_p_g = LLL_form_factors(
         bz, lB, g_coords
-    ) # shape: (N_s, N_s, res + 2, res + 2)
-    G_coords = np.array([
-        [0, 0],
-        [1, 0],
-        [1, 1],
-        [0, 1],
-        [-1, 0],
-        [-1, -1],
-        [0, -1],
-    ])
+    ) # shape: (N_s, N_s, res, res)
     
-    Lambda_k_p = np.zeros((G_coords.shape[0], bz.N_s, bz.N_s), dtype=np.complex128) # shape: (7, N_s, N_s)
-    for iG, G in enumerate(G_coords):
-        start1 = 1 + G[0]
-        stop1 = start1 + res
+    N_grid = 2 * G_radius + 1
+    G_coords = np.indices((N_grid, N_grid)).transpose(1, 2, 0) - G_radius
+    
+    Lambda_k_p_G = np.zeros((N_grid, N_grid, bz.N_s, bz.N_s), dtype=np.complex128)
+
+    if pbar:
+        from tqdm import tqdm
+        G_indices = tqdm(list(itertools.product(range(N_grid), repeat=2)), desc="Computing AC band form factors")
+    else:
+        G_indices = itertools.product(range(N_grid), repeat=2)
+        
+    for i, j in G_indices:
+        m, n = G_coords[i, j]
+        start1 = G_radius + m
+        stop1 = fourier_resolution - G_radius + m
         g_plus_G_slice_1 = slice(start1, stop1)
         
-        start2 = 1 + G[1]
-        stop2 = start2 + res
+        start2 = G_radius + n
+        stop2 = fourier_resolution - G_radius + n
         g_plus_G_slice_2 = slice(start2, stop2)
         
-        ff_k_p_g_plus_G = ff_k_p_g[:, :, g_plus_G_slice_1, g_plus_G_slice_2]  # shape: (N_s, N_s, res, res)
+        ff_k_p_g_plus_G = ff_k_p_g[:, :, g_plus_G_slice_1, g_plus_G_slice_2]
         N_k = normalizations[:, None]
         N_p = normalizations[None, :]
         unnormed = einsum(
             ff_k_p_g_plus_G,
-            wg[1:-1, 1:-1],
+            wg[G_radius:-G_radius, G_radius:-G_radius],
             "k p m n, m n -> k p"
         )
-        Lambda_k_p[iG, :, :] = N_k * N_p * unnormed
+        Lambda_k_p_G[i, j, :, :] = N_k * N_p * unnormed
     
-    return G_coords, Lambda_k_p
+    return G_coords, Lambda_k_p_G
 
 if __name__ == "__main__":
     from functools import partial
@@ -218,13 +224,13 @@ if __name__ == "__main__":
     N_s_28 = bz_28.n_samples
     
     lB = 1.0
-    # resolution = 126
-    resolution = 1022
+    # fourier_resolution = 128
+    fourier_resolution = 1024
     K_func = partial(K_func1, args=(0.8, b1, b2, b3))
     
     # normalization constants test
     g_coords, wg = wg_fourier_components(
-        K_func, bz_27.lattice, resolution, flatten=False
+        K_func, bz_27.lattice, fourier_resolution, flatten=False
     )
     normalizations = acband_normalization_constants(
         bz_27, lB, g_coords, wg, eps=1e-5
@@ -232,11 +238,13 @@ if __name__ == "__main__":
     
     # N = 27 test
     start = time.time()
-    ac_ff_27 = acband_form_factors(
+    _, ac_ff_27 = acband_form_factors(
         bz_27,
         lB,
         K_func,
-        resolution
+        fourier_resolution,
+        G_radius=16,
+        pbar=True
     )
     end = time.time()
     print(f"N = 27 AC band form factors computed in {end - start:.2f} seconds")
@@ -248,7 +256,9 @@ if __name__ == "__main__":
         bz_28,
         lB,
         K_func,
-        resolution
+        fourier_resolution,
+        G_radius=16,
+        pbar=True
     )
     end = time.time()
     
