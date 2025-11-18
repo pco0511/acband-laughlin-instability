@@ -158,7 +158,7 @@ class Lattice2D:
         return closest_lattice_coord.astype(int), wigner_seitz_vec
     
 
-    def divmod(self, vec, precision=12):
+    def divmod(self, vec: np.ndarray, precision: int=12):
         """
         Divide the vector into lattice coordinate and offset on Wigner-Seitz cell.
         
@@ -182,7 +182,7 @@ class Lattice2D:
             precision
         )
 
-    def reciprocal_divmod(self, vec, precision=12):
+    def reciprocal_divmod(self, vec: np.ndarray, precision: int=12):
         """
         Divide the vector into reciprocal lattice coordinate and offset on First Brillouin zone.
         

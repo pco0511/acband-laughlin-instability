@@ -12,4 +12,8 @@ wheels/
 
 # data files
 data/main/
+data/h5/
 figs/main/
+figs/archive/
+
+.CondaPkg/

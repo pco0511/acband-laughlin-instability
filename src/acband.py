@@ -142,7 +142,7 @@ def acband_form_factors(
     G_radius: int,
     pbar: bool=False,
     eps: float=1e-10
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     # compute \Lambda^{k, p}_G
     g_coords, wg = wg_fourier_components(
         K_func, bz.lattice, fourier_resolution, flatten=False
@@ -187,6 +187,62 @@ def acband_form_factors(
         Lambda_k_p_G[i, j, :, :] = N_k * N_p * unnormed
     
     return G_coords, Lambda_k_p_G
+
+def interaction_matrix(
+    bz: BrillouinZone2D,
+    fourier_G_coords: np.ndarray,
+    ac_ff: np.ndarray,
+    V: Callable[[np.ndarray], np.ndarray],
+):
+    G_vecs = bz.reciprocal_lattice.get_points(fourier_G_coords)
+    start_idx = 1
+    end_idx = fourier_G_coords.shape[0] - 1
+    G_vecs_center = G_vecs[start_idx:end_idx, start_idx:end_idx]
+
+    N_s = bz.n_samples
+    A = bz.lattice.unit_cell_area * N_s
+    # k, p, q
+    # (k, p) -> (k + q, p - q)
+    int_mat = np.zeros((N_s, N_s, N_s), dtype=np.complex128)
+    for k, p, q in itertools.product(range(N_s), repeat=3):
+        k1 = bz.sum(k, q) # k + q
+        k2 = bz.sub(p, q) # p - q
+        k3 = p
+        k4 = k
+
+        k1_coord = bz.k_coords[k1]
+        k2_coord = bz.k_coords[k2]
+        k3_coord = bz.k_coords[k3]
+        k4_coord = bz.k_coords[k4]
+        q_coord = bz.k_coords[q]
+        q_vec = bz.k_points[q]
+
+        _, G1_coord = bz.fold_coord(k4_coord + q_coord) # k1 + G1 = k4 + q
+        _, G2_coord = bz.fold_coord(k3_coord - q_coord) # k2 + G2 = k3 - q
+
+        q_vec_shited_grid = G_vecs_center + q_vec
+        V_grid = V(q_vec_shited_grid)
+
+        # for Lambda 1:
+        l1_start_x = start_idx + G1_coord[0]
+        l1_end_x   = end_idx   + G1_coord[0]
+        l1_start_y = start_idx + G1_coord[1]
+        l1_end_y   = end_idx   + G1_coord[1]
+
+        # for Lambda 2:
+        l2_start_x = start_idx - G2_coord[0]
+        l2_end_x   = end_idx   - G2_coord[0]
+        l2_start_y = start_idx - G2_coord[1]
+        l2_end_y   = end_idx   - G2_coord[1]
+
+        Lambda_1_grid = ac_ff[l1_start_x:l1_end_x, l1_start_y:l1_end_y, k1, k4][::-1, ::-1]
+        Lambda_2_grid = ac_ff[l2_start_x:l2_end_x, l2_start_y:l2_end_y, k2, k3]
+
+        interactions = V_grid * Lambda_1_grid * Lambda_2_grid
+        coeff = (1 / (2 * A)) * np.sum(interactions)
+        int_mat[k, p, q] = coeff
+
+    return int_mat
 
 if __name__ == "__main__":
     from functools import partial
