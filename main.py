@@ -24,6 +24,8 @@ parser = argparse.ArgumentParser(description="ED parameters")
 parser.add_argument("--n_sites", "-N", type=int, choices=[25, 27, 28], default=27, help="Number of lattice sites (N_s); must be one of {25, 27, 28}")
 parser.add_argument("--n_fermions", "-F", type=int, default=18, help="Number of fermions (N_f)")
 parser.add_argument("--K", type=float, default=0.8, help="K parameter for K_func")
+parser.add_argument("--fourier_resolution", type=int, default=256, help="Fourier resolution for AC band form factors")
+parser.add_argument("--G_radius", type=int, default=64, help="G vector radius for AC band form factors")
 args = parser.parse_args()
 
 N_s = args.n_sites
@@ -38,11 +40,11 @@ a_M = 1
 lB = ((sqrt3 / (4 * np.pi)) ** 0.5) * a_M
 
 # fourier_resolution = 128
-fourier_resolution = 256
-G_radius = 64
+fourier_resolution = args.fourier_resolution
+G_radius = args.G_radius
 V1 = 1.0
 # v1 = 3 * V1 * (a_M ** 4) / (4 * np.pi)
-v1 = sqrt3 * V1 * (a_M ** 4) / (4 * np.pi) # ????? 3 -> sqrt3
+v1 = 3 * V1 * (a_M ** 4) / (2 * np.pi) # ????? 4 pi -> 2pi
 
 
 # Lattice and Brillouin zones
@@ -158,13 +160,21 @@ plt.scatter(k_coms_flatten * lB, energies_flatten, color='red', alpha=0.25)
 plt.xlabel(r'$|\mathbf{k}_{\mathrm{COM}}|$')
 plt.ylabel('Energy')
 plt.title(f'ED Spectrum ($N={N_f}$, $N_S={N_s}$, $K={K:.3f}$)')
-os.makedirs('figs/main', exist_ok=True)
+
+
+FIG_ROOT = 'figs/supple_d'
+DATA_ROOT = 'data/supple_d'
+
+file_name = f'ed_spectrum_{N_f}_{N_s}_{K:.3f}_{fourier_resolution}_{G_radius}'
+
+os.makedirs(FIG_ROOT, exist_ok=True)
 ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-plt.savefig(f'figs/main/ed_spectrum_{N_f}_{N_s}_{K:.3f}_{ts}.png', dpi=300)
+fig_path = os.path.join(FIG_ROOT, f'{file_name}_{ts}.png')
+plt.savefig(fig_path, dpi=300, transparent=True)
 plt.close()
 
-data_path = f'data/main/ed_spectrum_{N_f}_{N_s}_{K:.3f}_{ts}.pkl'
-os.makedirs('data/main', exist_ok=True)
+data_path = os.path.join(DATA_ROOT, f'{file_name}_{ts}.pkl')
+os.makedirs(DATA_ROOT, exist_ok=True)
 with open(data_path, 'wb') as f:
     pickle.dump({
         'k_coms': k_coms_flatten,

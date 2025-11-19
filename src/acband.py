@@ -20,7 +20,8 @@ def K_func1(
         args: tuple[float, np.ndarray, np.ndarray, np.ndarray]
     ) -> np.ndarray:
     K, b1, b2, b3 = args
-    coeff = -np.sqrt(3) / (4 * np.pi) * K
+    # coeff = -np.sqrt(3) / (4 * np.pi) * K
+    coeff = -np.sqrt(3) / (2 * np.pi) * K # ????? 4 pi -> 2 pi
     cos1 = np.cos(einsum(x, b1, "... d, d -> ..."))
     cos2 = np.cos(einsum(x, b2, "... d, d -> ..."))
     cos3 = np.cos(einsum(x, b3, "... d, d -> ..."))
@@ -210,8 +211,8 @@ def interaction_matrix(
         k3 = p
         k4 = k
 
-        k1_coord = bz.k_coords[k1]
-        k2_coord = bz.k_coords[k2]
+        # k1_coord = bz.k_coords[k1]
+        # k2_coord = bz.k_coords[k2]
         k3_coord = bz.k_coords[k3]
         k4_coord = bz.k_coords[k4]
         q_coord = bz.k_coords[q]
@@ -224,10 +225,10 @@ def interaction_matrix(
         V_grid = V(q_vec_shited_grid)
 
         # for Lambda 1:
-        l1_start_x = start_idx + G1_coord[0]
-        l1_end_x   = end_idx   + G1_coord[0]
-        l1_start_y = start_idx + G1_coord[1]
-        l1_end_y   = end_idx   + G1_coord[1]
+        l1_start_x = start_idx - G1_coord[0]
+        l1_end_x   = end_idx   - G1_coord[0]
+        l1_start_y = start_idx - G1_coord[1]
+        l1_end_y   = end_idx   - G1_coord[1]
 
         # for Lambda 2:
         l2_start_x = start_idx - G2_coord[0]
