@@ -21,6 +21,7 @@ from src.acband import acband_form_factors, interaction_matrix, K_func1, K_func2
 from brillouin_zones import construct_brillouin_zones
 
 parser = argparse.ArgumentParser(description="ED parameters")
+parser.add_argument("--save_name", type=str, default="main", help="Base name for saving figures and data")
 parser.add_argument("--n_sites", "-N", type=int, choices=[25, 27, 28], default=27, help="Number of lattice sites (N_s); must be one of {25, 27, 28}")
 parser.add_argument("--n_fermions", "-F", type=int, default=18, help="Number of fermions (N_f)")
 parser.add_argument("--K", type=float, default=0.8, help="K parameter for K_func")
@@ -38,13 +39,13 @@ sqrt3 = 3.0 ** 0.5
 # a_M = (((4 * np.pi) / sqrt3) ** 0.5) * lB
 a_M = 1
 lB = ((sqrt3 / (4 * np.pi)) ** 0.5) * a_M
-
+     
 # fourier_resolution = 128
 fourier_resolution = args.fourier_resolution
 G_radius = args.G_radius
 V1 = 1.0
 # v1 = 3 * V1 * (a_M ** 4) / (4 * np.pi)
-v1 = 3 * V1 * (a_M ** 4) / (2 * np.pi) # ????? 4 pi -> 2pi
+v1 = 3 * V1 * (a_M ** 4) / (8 * np.pi) # ????? 4 pi -> 8 pi
 
 
 # Lattice and Brillouin zones
@@ -100,8 +101,13 @@ end_idx = 2 * G_radius
 G_vecs_slice = G_vecs[start_idx:end_idx, start_idx:end_idx]
 
 # Interaction matrix
+# def V(q):
+#     return -v1 * np.linalg.norm(q, axis=-1) ** 2
+
 def V(q):
     return -v1 * np.linalg.norm(q, axis=-1) ** 2
+
+    
 
 start = time.time()
 int_mat = interaction_matrix(
@@ -189,4 +195,7 @@ with open(data_path, 'wb') as f:
         'com_momentums': com_momentums,
         'eigenvalues': eigenvalues,
         'eigenvectors': eigenvectors,
+        'lattice': lattice,
+        'recip_lattice': recip_lattice,
+        'bz': bz_N_s,
     }, f)

@@ -10,10 +10,12 @@ wheels/
 .venv
 
 
-# data files
-data/main/
-data/h5/
-figs/main/
-figs/archive/
-
 .CondaPkg/
+
+# data files
+data/
+figs/
+
+# keep figs/svg tracked
+!figs/svg/
+!figs/svg/**

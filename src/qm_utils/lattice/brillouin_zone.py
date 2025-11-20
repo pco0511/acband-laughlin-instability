@@ -2,12 +2,10 @@ import itertools
 import random
 
 import numpy as np
+import matplotlib.pyplot as plt
 from einops import rearrange, pack
 
-if __name__ == "__main__":
-    from lattice import Lattice2D
-else:
-    from .lattice import Lattice2D
+from .lattice import Lattice2D
 
 __all__ = [
     "BrillouinZone2D"
@@ -136,6 +134,9 @@ class BrillouinZone2D:
     
     def sub(self, idx1, idx2):
         return self.sub_table[idx1, idx2]
+
+def visualize_values(bz: BrillouinZone2D, values: np.ndarray):
+    pass
 
 def test1():
     import matplotlib.pyplot as plt
