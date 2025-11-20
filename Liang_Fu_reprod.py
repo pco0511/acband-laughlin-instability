@@ -22,30 +22,23 @@ from brillouin_zones import construct_brillouin_zones
 
 parser = argparse.ArgumentParser(description="ED parameters")
 parser.add_argument("--save_name", type=str, default="main", help="Base name for saving figures and data")
-parser.add_argument("--n_sites", type=int, choices=[25, 27, 28], default=27, help="Number of lattice sites (N_s); must be one of {25, 27, 28}")
-parser.add_argument("--n_fermions", type=int, default=9, help="Number of fermions (N_f)")
-parser.add_argument("--sum_radius", type=float, default=10.0, help="Sum radius for attached solenoids")
+parser.add_argument("--n_sites", "-N", type=int, choices=[25, 27, 28], default=27, help="Number of lattice sites (N_s); must be one of {25, 27, 28}")
+parser.add_argument("--n_fermions", "-F", type=int, default=18, help="Number of fermions (N_f)")
+parser.add_argument("--K", type=float, default=0.8, help="K parameter for K_func")
 parser.add_argument("--fourier_resolution", type=int, default=256, help="Fourier resolution for AC band form factors")
 parser.add_argument("--G_radius", type=int, default=64, help="G vector radius for AC band form factors")
 args = parser.parse_args()
 
 N_s = args.n_sites
 N_f = args.n_fermions
-m = N_s // N_f
-if N_s % N_f != 0:
-    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-    print(f"WARNING: N_s must be divisible by N_f for 1/m filling; got N_s={N_s}, N_f={N_f}")
-    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-    
+K = args.K
 
 sqrt3 = 3.0 ** 0.5
 
 # lB = 1.0
 # a_M = (((4 * np.pi) / sqrt3) ** 0.5) * lB
 a_M = 1
-lB = ((sqrt3 / (4 * m * np.pi)) ** 0.5) * a_M
+lB = ((sqrt3 / (4 * np.pi)) ** 0.5) * a_M
      
 # fourier_resolution = 128
 fourier_resolution = args.fourier_resolution
@@ -67,6 +60,7 @@ bz = construct_brillouin_zones(lattice)
 
 bz_N_s = bz[N_s]
 
+
 # Many-body Hilbert spaces
 constraints = get_sector_constraints(bz_N_s, N_f)
 hilbs = [
@@ -83,8 +77,11 @@ for k_index, sector in enumerate(hilbs):
 b1, b2 = lattice.reciprocal_lattice_vectors
 b3 = -(b1 + b2)
 
-K_func_args = (3, 0.25, 20, a1, a2)
-K_func = partial(K_func2, args=K_func_args)
+K_func_args = (K, b1, b2, b3)
+K_func = partial(K_func1, args=K_func_args)
+
+# K_func_args = (3, 0.25, 20, a1, a2)
+# K_func = partial(K_func2, args=K_func_args)
 
 start = time.time()
 G_coords, ac_ff = acband_form_factors(
@@ -189,7 +186,7 @@ with open(data_path, 'wb') as f:
         'energies': energies_flatten,
         'N_f': N_f,
         'N_s': N_s,
-        'm': m,
+        'K': K,
         'fourier_resolution': fourier_resolution,
         'G_radius': G_radius,
         'a_M': a_M,

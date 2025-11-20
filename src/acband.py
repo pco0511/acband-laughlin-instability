@@ -29,25 +29,55 @@ def K_func1(
 
 def K_func2(
         x: np.ndarray,
-        args: tuple[int, float, int, np.ndarray, np.ndarray]
+        args: tuple[int, float, float, np.ndarray, np.ndarray]
     ) -> np.ndarray:
     # solenoid
-    m, sigma, N, a1, a2 = args
+    m, sigma, R, a1, a2 = args
+
+    N = int(np.ceil(2 * R))
     ns = np.linspace(-N, N, 2 * N + 1)
     n1 = ns[:, None, None]
     n2 = ns[None, :, None]
     lattice_points = n1 * a1[None, None, :] + n2 * a2[None, None, :]
     flatten_lattice_points = rearrange(lattice_points, "n1 n2 d -> (n1 n2) d")
+    flatten_lattice_points_norms = np.linalg.norm(flatten_lattice_points, axis=-1)
+    flatten_lattice_points = flatten_lattice_points[flatten_lattice_points_norms < R, :]
     
     x_batch_shape = x.shape[:-1]
     x_flatten = rearrange(x, "... d -> (...) d")
-    diffs = x_flatten[:, None, :] - flatten_lattice_points[None, :, :]
-    dists_square = np.sum(diffs ** 2, axis=-1) / (sigma ** 2)
-    dists = np.sqrt(dists_square) 
+    
+    origin_point = np.array([[0.0, 0.0]])
+    x_calc = np.concatenate([x_flatten, origin_point], axis=0)
+    
+    k_vals_calc = np.zeros(x_calc.shape[0])
+    batch_size = 64
+    num_points = flatten_lattice_points.shape[0]
+    
+    for i in range(0, num_points, batch_size):
+        batch_lattice_points = flatten_lattice_points[i:i+batch_size]
+        
+        diffs = x_calc[:, None, :] - batch_lattice_points[None, :, :]
+        dists_square = np.sum(diffs ** 2, axis=-1) / (sigma ** 2)
+        dists = np.sqrt(dists_square) 
 
-    chis = np.where(dists < 1, dists_square - (1/2), np.log(dists))
-    k_vals_flatten = (1 / m) * np.sum(chis, axis=1)
-    k_vals = np.reshape(k_vals_flatten, shape=x_batch_shape)
+        chis = np.where(dists < 1, (dists_square - 1) / 2, np.log(dists))
+        k_vals_calc += np.sum(chis, axis=1)
+    
+    n = 1 / (np.abs(a1[0] * a2[1] - a1[1] * a2[0]))
+    c1 = (np.pi / 2) * n
+    c0 = np.pi * n * (R ** 2) * (np.log(R / sigma) - 0.5)
+    
+    background = c1 * np.sum(x_calc ** 2, axis=-1) + c0
+    k_vals_calc -= background
+
+    k_vals_calc *= m
+    
+    offset = k_vals_calc[-1]
+    k_vals_calc -= offset
+    
+    k_vals_final = k_vals_calc[:-1]
+
+    k_vals = np.reshape(k_vals_final, shape=x_batch_shape)
     return k_vals
 
 def wg_fourier_components(
