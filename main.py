@@ -25,6 +25,7 @@ parser.add_argument("--save_name", type=str, default="main", help="Base name for
 parser.add_argument("--n_sites", type=int, choices=[25, 27, 28], default=27, help="Number of lattice sites (N_s); must be one of {25, 27, 28}")
 parser.add_argument("--n_fermions", type=int, default=9, help="Number of fermions (N_f)")
 parser.add_argument("--sum_radius", type=float, default=10.0, help="Sum radius for attached solenoids")
+parser.add_argument("--sigma", type=float, required=True, help="Sigma for attached solenoids")
 parser.add_argument("--fourier_resolution", type=int, default=256, help="Fourier resolution for AC band form factors")
 parser.add_argument("--G_radius", type=int, default=64, help="G vector radius for AC band form factors")
 args = parser.parse_args()
@@ -83,7 +84,9 @@ for k_index, sector in enumerate(hilbs):
 b1, b2 = lattice.reciprocal_lattice_vectors
 b3 = -(b1 + b2)
 
-K_func_args = (3, 0.25, 20, a1, a2)
+sigma = args.sigma
+sum_radius = args.sum_radius
+K_func_args = (3, sigma, sum_radius, a1, a2)
 K_func = partial(K_func2, args=K_func_args)
 
 start = time.time()
@@ -166,14 +169,14 @@ plt.figure(figsize=(8, 6))
 plt.scatter(k_coms_flatten * lB, energies_flatten, color='red', alpha=0.25)
 plt.xlabel(r'$|\mathbf{k}_{\mathrm{COM}}|$')
 plt.ylabel('Energy')
-plt.title(f'ED Spectrum ($N={N_f}$, $N_S={N_s}$, $K={K:.3f}$)')
+plt.title(f'ED Spectrum ($N={N_f}$, $N_S={N_s}$, $\\sigma={sigma:.2f}$)')
 
 
 save_name = args.save_name
 FIG_ROOT = f'figs/{save_name}'
 DATA_ROOT = f'data/{save_name}'
 
-file_name = f'ed_spectrum_{N_f}_{N_s}_{K:.3f}_{fourier_resolution}_{G_radius}'
+file_name = f'ed_spectrum_{N_f}_{N_s}_{sigma:.3f}_{fourier_resolution}_{G_radius}'
 
 os.makedirs(FIG_ROOT, exist_ok=True)
 ts = datetime.now().strftime('%Y%m%d_%H%M%S')
