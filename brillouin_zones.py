@@ -18,6 +18,7 @@ def construct_brillouin_zones(lattice: Lattice2D) -> dict[int, BrillouinZone2D]:
     bz_27 = BrillouinZone2D(lattice, sample_lattice_27)
     bz[27] = bz_27
 
+
     # N = 28 grid
     p1 = b1 + t2 - t1
     normb1 = np.linalg.norm(b1)
@@ -41,5 +42,17 @@ def construct_brillouin_zones(lattice: Lattice2D) -> dict[int, BrillouinZone2D]:
 
     bz_25 = BrillouinZone2D(lattice, sample_lattice_25)
     bz[25] = bz_25
+
+    # N = 49 grid
+    p1 = 7 * t1
+    normb1 = np.linalg.norm(b1)
+    normp1 = np.linalg.norm(p1)
+    distb1p1 = np.linalg.norm(b1 - p1)
+    scale = normb1 / normp1
+    rot = -np.arccos((normb1 ** 2 + normp1 ** 2 - distb1p1 ** 2) / (2 * normb1 * normp1))
+    sample_lattice_49 = sample_lattice_27.transformed(scale=scale, rot=rot)
+
+    bz_49 = BrillouinZone2D(lattice, sample_lattice_49)
+    bz[49] = bz_49
 
     return bz

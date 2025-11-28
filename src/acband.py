@@ -278,6 +278,26 @@ def interaction_matrix(
 
     return int_mat
 
+def interaction_hamiltonian_terms(
+    bz: BrillouinZone2D,
+    int_mat: np.ndarray,
+):
+    terms = []
+    weights = []
+    N_s = bz.n_samples
+    for k, p, q in itertools.product(range(N_s), repeat=3):
+        k1 = bz.sum(k, q) # k + q
+        k2 = bz.sub(p, q) # p - q # p - q
+        k3 = p
+        k4 = k
+        weights.append(
+            complex(int_mat[k, p, q])
+        )
+        terms.append(
+            ((k1, 1), (k2, 1), (k3, 0), (k4, 0))
+        )
+    return terms, weights
+
 if __name__ == "__main__":
     from functools import partial
     import time

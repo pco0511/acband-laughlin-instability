@@ -10,13 +10,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import netket as nk
-from netket.operator.fermion import destroy as c
-from netket.operator.fermion import create as cdag
+from netket.operator import FermionOperator2nd
 from netket.experimental.operator import ParticleNumberConservingFermioperator2nd
 
 from src.qm_utils.lattice.lattice import Lattice2D
 from src.netket_compat import get_sector_constraints
-from src.acband import acband_form_factors, interaction_matrix, K_func1, K_func2
+from src.acband import (
+    acband_form_factors,
+    interaction_matrix,
+    K_func1,
+    K_func2,
+    interaction_hamiltonian_terms
+)
 
 from brillouin_zones import construct_brillouin_zones
 
@@ -26,8 +31,8 @@ parser.add_argument("--n_sites", type=int, choices=[25, 27, 28], default=27, hel
 parser.add_argument("--n_fermions", type=int, default=9, help="Number of fermions (N_f)")
 parser.add_argument("--sum_radius", type=float, default=10.0, help="Sum radius for attached solenoids")
 parser.add_argument("--sigma", type=float, required=True, help="Sigma for attached solenoids")
-parser.add_argument("--fourier_resolution", type=int, default=256, help="Fourier resolution for AC band form factors")
-parser.add_argument("--G_radius", type=int, default=64, help="G vector radius for AC band form factors")
+parser.add_argument("--fourier_resolution", type=int, default=128, help="Fourier resolution for AC band form factors")
+parser.add_argument("--G_radius", type=int, default=32, help="G vector radius for AC band form factors")
 args = parser.parse_args()
 
 N_s = args.n_sites
@@ -88,12 +93,13 @@ sigma = args.sigma
 sum_radius = args.sum_radius
 K_func_args = (3, sigma, sum_radius, a1, a2)
 K_func = partial(K_func2, args=K_func_args)
+zero_K_func = partial(K_func1, args=(0, b1, b2, b3))
 
 start = time.time()
 G_coords, ac_ff = acband_form_factors(
     bz[N_s],
     lB,
-    K_func,
+    zero_K_func,
     fourier_resolution,
     G_radius=G_radius,
     pbar=True
@@ -110,8 +116,11 @@ G_vecs_slice = G_vecs[start_idx:end_idx, start_idx:end_idx]
 # def V(q):
 #     return -v1 * np.linalg.norm(q, axis=-1) ** 2
 
+# def V(q):
+#     return -v1 * np.linalg.norm(q, axis=-1) ** 2
+
 def V(q):
-    return -v1 * np.linalg.norm(q, axis=-1) ** 2
+    return 1.0 / (np.linalg.norm(q, axis=-1) ** 2 + 1e-2)
 
 start = time.time()
 int_mat = interaction_matrix(
@@ -125,18 +134,12 @@ print(f"Interaction matrix computed in {end - start:.2f} seconds")
 
 hamiltonians = []
 for sector_index, sector in enumerate(hilbs):
-    H = 0.0
-    for k, p, q in itertools.product(range(N_s), repeat=3):
-        H_k1_k2_k3_k4 = int_mat[k, p, q]
-        k1 = bz_N_s.sum(k, q) # k + q
-        k2 = bz_N_s.sub(p, q) # p - q
-        k3 = p
-        k4 = k
-        c_dag_k1 = cdag(sector, k1)
-        c_dag_k2 = cdag(sector, k2)
-        c_k3 = c(sector, k3)
-        c_k4 = c(sector, k4)
-        H += complex(H_k1_k2_k3_k4) * (c_dag_k1 @ c_dag_k2 @ c_k3 @ c_k4)
+    terms, weights = interaction_hamiltonian_terms(bz_N_s, int_mat)
+    H = FermionOperator2nd(
+        sector,
+        terms,
+        weights
+    )
     H = ParticleNumberConservingFermioperator2nd.from_fermionoperator2nd(H)
     hamiltonians.append(H)
 
@@ -147,7 +150,7 @@ com_momentums = []
 for k_index, (sector, H) in enumerate(zip(hilbs, hamiltonians)):
     print(f"Diagonalizing sector {k_index} with dimension {sector.n_states}...")
     start = time.time()
-    evals, evecs = nk.exact.lanczos_ed(H, k=30, compute_eigenvectors=True)
+    evals, evecs = nk.exact.lanczos_ed(H, k=15, compute_eigenvectors=True)
     end = time.time()
     print(f"  Diagonalized in {end - start:.2f} seconds")
     eigenvalues.append(evals)

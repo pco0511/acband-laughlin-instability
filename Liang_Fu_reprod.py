@@ -10,13 +10,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import netket as nk
-from netket.operator.fermion import destroy as c
-from netket.operator.fermion import create as cdag
+from netket.operator import FermionOperator2nd
 from netket.experimental.operator import ParticleNumberConservingFermioperator2nd
 
 from src.qm_utils.lattice.lattice import Lattice2D
 from src.netket_compat import get_sector_constraints
-from src.acband import acband_form_factors, interaction_matrix, K_func1, K_func2
+from src.acband import (
+    acband_form_factors, 
+    interaction_matrix, 
+    K_func1,
+    interaction_hamiltonian_terms
+)
 
 from brillouin_zones import construct_brillouin_zones
 
@@ -47,7 +51,6 @@ V1 = 1.0
 # v1 = 3 * V1 * (a_M ** 4) / (4 * np.pi)
 v1 = 3 * V1 * (a_M ** 4) / (8 * np.pi) # ????? 4 pi -> 8 pi
 
-
 # Lattice and Brillouin zones
 e1 = np.array([1, 0])
 e2 = np.array([0, 1])
@@ -59,7 +62,6 @@ recip_lattice = lattice.reciprocal()
 bz = construct_brillouin_zones(lattice)
 
 bz_N_s = bz[N_s]
-
 
 # Many-body Hilbert spaces
 constraints = get_sector_constraints(bz_N_s, N_f)
@@ -80,9 +82,6 @@ b3 = -(b1 + b2)
 K_func_args = (K, b1, b2, b3)
 K_func = partial(K_func1, args=K_func_args)
 
-# K_func_args = (3, 0.25, 20, a1, a2)
-# K_func = partial(K_func2, args=K_func_args)
-
 start = time.time()
 G_coords, ac_ff = acband_form_factors(
     bz[N_s],
@@ -101,9 +100,6 @@ end_idx = 2 * G_radius
 G_vecs_slice = G_vecs[start_idx:end_idx, start_idx:end_idx]
 
 # Interaction matrix
-# def V(q):
-#     return -v1 * np.linalg.norm(q, axis=-1) ** 2
-
 def V(q):
     return -v1 * np.linalg.norm(q, axis=-1) ** 2
 
@@ -119,18 +115,12 @@ print(f"Interaction matrix computed in {end - start:.2f} seconds")
 
 hamiltonians = []
 for sector_index, sector in enumerate(hilbs):
-    H = 0.0
-    for k, p, q in itertools.product(range(N_s), repeat=3):
-        H_k1_k2_k3_k4 = int_mat[k, p, q]
-        k1 = bz_N_s.sum(k, q) # k + q
-        k2 = bz_N_s.sub(p, q) # p - q
-        k3 = p
-        k4 = k
-        c_dag_k1 = cdag(sector, k1)
-        c_dag_k2 = cdag(sector, k2)
-        c_k3 = c(sector, k3)
-        c_k4 = c(sector, k4)
-        H += complex(H_k1_k2_k3_k4) * (c_dag_k1 @ c_dag_k2 @ c_k3 @ c_k4)
+    terms, weights = interaction_hamiltonian_terms(bz_N_s, int_mat)
+    H = FermionOperator2nd(
+        sector,
+        terms,
+        weights
+    )
     H = ParticleNumberConservingFermioperator2nd.from_fermionoperator2nd(H)
     hamiltonians.append(H)
 

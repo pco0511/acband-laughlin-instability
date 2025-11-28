@@ -134,7 +134,7 @@ class BrillouinZone2D:
     
     def sub(self, idx1, idx2):
         return self.sub_table[idx1, idx2]
-
+    
 def visualize_values(bz: BrillouinZone2D, values: np.ndarray):
     pass
 
