@@ -128,8 +128,45 @@ class Lattice2D:
 
 
     @staticmethod
-    def _divmod(lvs, rlvs, cand, vec, precision):
+    def _divmod(
+        lvs: np.ndarray, 
+        rlvs: np.ndarray, 
+        cand: np.ndarray, 
+        vec: np.ndarray, 
+        precision: int, 
+        inversion_symmetric: bool
+    ):
         # vec_cent = vec - offset # vec = vec_cent + offset
+
+        # adjustment for inversion symmetric folding
+        if inversion_symmetric:
+            # forcing a1 and a2 to be acute angle
+            a1, a2 = lvs
+            b1, b2 = rlvs
+            det = a1[0] * a2[1] - a1[1] * a2[0]
+            assert abs(det) > 1e-8, "Reciprocal lattice vectors are linearly dependent."
+
+            if det > 0:
+                conv_mat = np.array([[1, 0], [0, 1]])
+            else:
+                a1, a2 = a2, a1
+                b1, b2 = b2, b1
+                conv_mat = np.array([[0, 1], [1, 0]])
+
+            ang1 = np.arctan2(a1[1], a1[0])
+            ang2 = np.arctan2(a2[1], a2[0])
+            rel_ang = (ang2 - ang1) % (2 * np.pi)
+            assert rel_ang < np.pi
+
+            if rel_ang < (np.pi / 2):
+                a3 = a2 - a1
+            else:
+                b1 = b1 - b2
+                a3 = a1 + a2
+                a2, a3 = a3, a2
+                conv_mat[:, 1] += conv_mat[:, 0]
+            lvs = np.array([a1, a2])
+            rlvs = np.array([b1, b2])
 
         coeffs = einsum(vec, rlvs, '... j, i j -> ... i') / (2 * np.pi)
 
@@ -137,15 +174,32 @@ class Lattice2D:
 
         candidate_coords = floor_coords[..., None, :] + cand
         candidate_lattice_pos = einsum(candidate_coords, lvs, '... c j, j i -> ... c i')
-        dist_vectors = vec[..., None, :] - candidate_lattice_pos
+        dist_vectors = vec[..., None, :] - candidate_lattice_pos # (..., n_cand, 2)
         dist_sqs = np.sum(dist_vectors**2, axis=-1)
-
         dist_sqs_rounded = np.round(dist_sqs, decimals=precision)
 
         cand_x = candidate_coords[..., 0]
         cand_y = candidate_coords[..., 1]
-        sort_keys = (cand_x, cand_y, dist_sqs_rounded)
+
+        if inversion_symmetric:
+            dot1 = einsum(dist_vectors, b1 + b2, '... c i, i -> ... c')
+            
+            neg_dot1 = -dot1
+            neg_dot1_rounded = np.round(neg_dot1, decimals=precision)
+
+            neg_abs_dot1 = -np.abs(dot1)
+            neg_abs_dot1_rounded = np.round(neg_abs_dot1, decimals=precision)
+            
+            dot2 = einsum(dist_vectors, a1, '... c i, i -> ... c')
+            abs_dot2 = np.abs(dot2)
+            abs_dot2_rounded = np.round(abs_dot2, decimals=precision)
+
+            sort_keys = (cand_x, abs_dot2_rounded, neg_dot1_rounded, neg_abs_dot1_rounded, dist_sqs_rounded)
+        else:
+            sort_keys = (cand_x, cand_y, dist_sqs_rounded)
+
         sorted_indices = np.lexsort(sort_keys, axis=-1)
+
         min_index = sorted_indices[..., 0]
         min_index_expanded = min_index[..., None, None]
 
@@ -153,12 +207,18 @@ class Lattice2D:
         wigner_seitz_vec_batch = np.take_along_axis(dist_vectors, min_index_expanded, axis=-2)
         
         closest_lattice_coord = np.squeeze(closest_lattice_coord_batch, axis=-2)
+        closest_lattice_coord = einsum(conv_mat, closest_lattice_coord, 'i j, ... j -> ... i')
         wigner_seitz_vec = np.squeeze(wigner_seitz_vec_batch, axis=-2)
 
         return closest_lattice_coord.astype(int), wigner_seitz_vec
     
 
-    def divmod(self, vec: np.ndarray, precision: int=12):
+    def divmod(
+        self,
+        vec: np.ndarray,
+        precision: int=12,
+        inversion_symmetric: bool=True
+    ):
         """
         Divide the vector into lattice coordinate and offset on Wigner-Seitz cell.
         
@@ -176,13 +236,18 @@ class Lattice2D:
         return self._divmod(
             self.lattice_vectors, 
             self.reciprocal_lattice_vectors,
-            # self.offset,
             self._candidate_offsets,
             vec,
-            precision
+            precision,
+            inversion_symmetric
         )
 
-    def reciprocal_divmod(self, vec: np.ndarray, precision: int=12):
+    def reciprocal_divmod(
+        self,
+        vec: np.ndarray,
+        precision: int=12,
+        inversion_symmetric: bool=True
+    ):
         """
         Divide the vector into reciprocal lattice coordinate and offset on First Brillouin zone.
         
@@ -200,10 +265,10 @@ class Lattice2D:
         return self._divmod(
             self.reciprocal_lattice_vectors, 
             self.lattice_vectors,
-            # np.zeros((self._ndim,)),
             self._candidate_offsets,
             vec,
-            precision
+            precision,
+            inversion_symmetric
         )
     
     def pos_from_coord(self, coord: tuple[int, int]):
@@ -275,7 +340,7 @@ if __name__ == "__main__":
     colors = np.full((fine_points.shape[0], 3), 0.5)
     colors += lattice_coord[:, 0][:, None] * np.array([[0.15, 0.0, 0]])
     colors += lattice_coord[:, 1][:, None] * np.array([[0, 0.15, 0.15]])
-    
+
     colors = np.clip(colors, 0.0, 1.0)
 
     plt.figure(figsize=(8, 8))

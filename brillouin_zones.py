@@ -43,6 +43,11 @@ def construct_brillouin_zones(lattice: Lattice2D) -> dict[int, BrillouinZone2D]:
     bz_25 = BrillouinZone2D(lattice, sample_lattice_25)
     bz[25] = bz_25
 
+    # N = 48 grid
+    sample_lattice_48 = sample_lattice_27.transformed(scale=3/4)
+    bz_48 = BrillouinZone2D(lattice, sample_lattice_48)
+    bz[48] = bz_48
+
     # N = 49 grid
     p1 = 7 * t1
     normb1 = np.linalg.norm(b1)
