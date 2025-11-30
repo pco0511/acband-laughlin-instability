@@ -18,8 +18,8 @@ class BrillouinZone2D:
         bz_sample_lattice: Lattice2D,
         eps: float=1e-12
     ):
-        self.lattice = lattice
-        self.bz_sample_lattice = bz_sample_lattice
+        self.lattice: Lattice2D = lattice
+        self.bz_sample_lattice: Lattice2D = bz_sample_lattice
 
         # b1 = n11 t1 + n12 t2
         # b2 = n21 t1 + n22 t2
@@ -32,15 +32,15 @@ class BrillouinZone2D:
         if np.linalg.norm(offset1) >= eps or np.linalg.norm(offset2) >= eps:
             raise ValueError("Sampling lattice is not a superlattice of the reciprocal lattice of given lattice.")
         
-        self.b1 = b1
-        self.b2 = b2
-        self.t1 = t1
-        self.t2 = t2
+        self.b1: np.ndarray = b1
+        self.b2: np.ndarray = b2
+        self.t1: np.ndarray = t1
+        self.t2: np.ndarray = t2
         
-        self.n11 = n11
-        self.n12 = n12
-        self.n21 = n21
-        self.n22 = n22
+        self.n11: int = n11
+        self.n12: int = n12
+        self.n21: int = n21
+        self.n22: int = n22
 
         B = max(np.linalg.norm(b1), np.linalg.norm(b2))
         T = min(np.linalg.norm(t1), np.linalg.norm(t2))
@@ -58,18 +58,18 @@ class BrillouinZone2D:
         coords, _ = lattice.reciprocal_divmod(candidates)
         first_bz = np.logical_and(coords[:,0]==0, coords[:,1]==0)
 
-        self.k_points = candidates[first_bz]
-        self.k_coords = sample_coords[first_bz]
-        self.n_samples = np.sum(first_bz)
+        self.k_points: np.ndarray = candidates[first_bz]
+        self.k_coords: np.ndarray = sample_coords[first_bz]
+        self.n_samples: int = np.sum(first_bz)
 
         # maps
-        self.idx_from_coord = {(n1, n2) : idx for idx, (n1, n2) in enumerate(self.k_coords)}
+        self.idx_from_coord: dict = {(n1, n2) : idx for idx, (n1, n2) in enumerate(self.k_coords)}
 
         # look up tables
         N_s = self.n_samples
-        self.neg_table = np.empty((N_s,), dtype=int)
-        self.sum_table = np.empty((N_s, N_s), dtype=int)
-        self.sub_table = np.empty((N_s, N_s), dtype=int)
+        self.neg_table: np.ndarray = np.empty((N_s,), dtype=int)
+        self.sum_table: np.ndarray = np.empty((N_s, N_s), dtype=int)
+        self.sub_table: np.ndarray = np.empty((N_s, N_s), dtype=int)
         
         # initialization
         for i in range(N_s):

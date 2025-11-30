@@ -105,7 +105,8 @@ def csr_from_nk_fermion_op(
     discrete_op: FermionOperator2ndJax,
     domain_sector: Sector,
     codomain_sector: Sector,
-    batch_size=65536
+    batch_size: int = 65536,
+    pbar: bool = False
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     # x = jax.vmap(bitset_to_array, in_axes=(0, None))(
     #     codomain_sector.basis_labels, codomain_sector.full_hilb.n_modes
@@ -128,7 +129,11 @@ def csr_from_nk_fermion_op(
     indices = []
     indptr = np.empty(codomain_sector.dim + 1, dtype=np.int32)
     indptr[0] = 0
-    for i in range(0, codomain_sector.dim, batch_size):
+    if pbar:
+        iterator = tqdm.tqdm(list(range(0, codomain_sector.dim, batch_size)))
+    else:
+        iterator = range(0, codomain_sector.dim, batch_size)
+    for i in iterator:
         x_batch = vectorized_bitset_to_array(
             codomain_sector.basis_labels[i:i+batch_size], codomain_sector.full_hilb.n_modes
         )

@@ -59,7 +59,7 @@ class DiscreteFermionicFockSpace:
         # self.number_sector_ends = size_cumsum
 
         self.dim = len(self.states)
-        self.state_to_index = {state: idx for idx, state in enumerate(self.states)}
+        self._state_to_index = None
 
     def __repr__(self) -> str:
         return (
@@ -68,17 +68,33 @@ class DiscreteFermionicFockSpace:
         )
 
     @property
+    def state_to_index(self) -> dict[int, int]:
+        if self._state_to_index is None:
+            self._state_to_index = {
+                state: idx for idx, state in enumerate(self.states)
+            }
+        return self._state_to_index
+
+    @property
     def dense_operator_size(self) -> int:
         return ((self.dim) ** 2) * 16
     
-    def decompose_sectors(self, labeling_fn:Callable[[int], int], sector_labels: list):
+
+
+    def decompose_sectors(self, labeling_fn:Callable[[int], int], sector_labels: list, pbar=False):
         
         @jax.vmap   
         def batched_labeling(state):
             return labeling_fn(state)
 
         labels = np.empty(self.dim, dtype=int)
-        for i in range(0, self.dim, LARGE_BATCH_SIZE):
+        
+        if pbar:
+            batch_slices = tqdm(list(range(0, self.dim, LARGE_BATCH_SIZE)))
+        else:
+            batch_slices = range(0, self.dim, LARGE_BATCH_SIZE)
+
+        for i in batch_slices:
             state_batch = self.states[i:i+LARGE_BATCH_SIZE]
             labels[i:i+LARGE_BATCH_SIZE] = batched_labeling(state_batch)
 
