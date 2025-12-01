@@ -9,9 +9,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy
 
+os.environ["XLA_FLAGS"] = "--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
+
 import jax
 jax.config.update("jax_enable_x64", True)
-import jax.numpy as jnp
+import logging
+logger = logging.getLogger("jax._src.xla_bridge")
+logger.setLevel(logging.ERROR)
 
 import netket as nk
 from netket.hilbert import SpinOrbitalFermions
@@ -28,7 +32,7 @@ from src.acband import (
 )
 from src.qm_utils.fermion.fermionic_fock import DiscreteFermionicFockSpace
 from src.qm_utils.fermion.fermion_utils import (
-    bitset_to_mode_indices,
+    bitset_to_mode_indices, total_sum_by_table
 
 )
 from brillouin_zones import construct_brillouin_zones
@@ -79,26 +83,19 @@ bz_N_s = bz[N_s]
 # Many-body Hilbert spaces
 full_hilb = DiscreteFermionicFockSpace(mode_labels=list(range(N_s)), particle_numbers=N_f)
 
-zero_idx = jnp.array(bz_N_s.zero())
-sum_table_jax = jnp.array(bz_N_s.sum_table)
+print("Labeling states...")
+start = time.time()
+state_labels = total_sum_by_table(
+    full_hilb.states,
+    n_modes=N_s, zero_idx=bz_N_s.zero(), sum_table=bz_N_s.sum_table
+)
+end = time.time()
+print(f"  Labeled {full_hilb.dim} states in {end - start:.2f} seconds")
 
-def sum_indices(indices):
-    def scan_fn(carry, x):
-        new_carry = sum_table_jax[carry, x]
-        return new_carry, None
-    init_carry = zero_idx
-    final_carry, _ = jax.lax.scan(scan_fn, init_carry, indices)
-    return final_carry
-
-def labeling_fn(state_int):
-    mode_indices = bitset_to_mode_indices(state_int, n_modes=N_s, max_n_particles=N_f, fill_value=zero_idx)
-    summed_index = sum_indices(mode_indices)
-    return summed_index
-
-labels = list(range(N_s))
 print("Decomposing sectors...")
 start = time.time()
-sectors = full_hilb.decompose_sectors(labeling_fn, labels, pbar=True)
+sector_labels = list(range(N_s))
+sectors = full_hilb.decompose_sector_by_labels(state_labels, sector_labels)
 end = time.time()
 print(f"  Decomposed into {len(sectors)} sectors in {end - start:.2f} seconds")
 for label, sector in sectors.items():
@@ -111,6 +108,7 @@ b3 = -(b1 + b2)
 K_func_args = (K, b1, b2, b3)
 K_func = partial(K_func1, args=K_func_args)
 
+print("computing AC band form factors...")
 start = time.time()
 G_coords, ac_ff = acband_form_factors(
     bz[N_s],
@@ -118,7 +116,6 @@ G_coords, ac_ff = acband_form_factors(
     K_func,
     fourier_resolution,
     G_radius=G_radius,
-    pbar=True
 )
 end = time.time()
 print(f"AC band form factors computed in {end - start:.2f} seconds")
@@ -132,6 +129,7 @@ G_vecs_slice = G_vecs[start_idx:end_idx, start_idx:end_idx]
 def V(q):
     return -v1 * np.linalg.norm(q, axis=-1) ** 2
 
+print("computing interaction matrix...")
 start = time.time()
 int_mat = interaction_matrix(
     bz_N_s,
@@ -162,9 +160,10 @@ for k_idx, (label, sector) in enumerate(sectors.items()):
     if args.gamma_only and label != gamma_idx:
         continue
     print(f"Diagonalizing sector {label} with dimension {sector.dim}...")
+    print("  Constructing sparse representation:")
     start = time.time()
     sparse_rep = csr_from_nk_fermion_op(
-        H, sector, sector, batch_size=65536, pbar=True
+        H, sector, sector, batch_size=512, pbar=True, n_jobs=64
     )
     end = time.time()
     print(f"  Sparse matrix constructed in {end - start:.2f} seconds")
@@ -203,10 +202,13 @@ file_name = f'ed_spectrum_{N_f}_{N_s}_{K:.3f}_{fourier_resolution}_{G_radius}'
 os.makedirs(FIG_ROOT, exist_ok=True)
 ts = datetime.now().strftime('%Y%m%d_%H%M%S')
 fig_path = os.path.join(FIG_ROOT, f'{file_name}_{ts}.png')
+print(f"Saving figure to {fig_path}...")
 plt.savefig(fig_path, dpi=300, transparent=True)
 plt.close()
 
+
 data_path = os.path.join(DATA_ROOT, f'{file_name}_{ts}.pkl')
+print(f"Saving data to {data_path}...")
 os.makedirs(DATA_ROOT, exist_ok=True)
 with open(data_path, 'wb') as f:
     pickle.dump({

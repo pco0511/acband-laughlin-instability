@@ -5,6 +5,7 @@ from functools import partial
 import numpy as np
 
 from jaxtyping import Array, Int
+from numba import njit, prange
 
 jax.config.update("jax_enable_x64", True)
 
@@ -42,3 +43,35 @@ def bitset_to_mode_indices(state_int: int, n_modes: int, max_n_particles: int, f
         size=max_n_particles, 
         fill_value=fill_value
     )[0]
+
+@njit(fastmath=True, cache=True)
+def bitsets_to_array_numba(states, n_modes):
+    n_batch = states.shape[0]
+    out = np.zeros((n_batch, n_modes), dtype=np.int8)
+
+    for i in range(n_batch):
+        val = states[i]
+        for b in range(n_modes):
+            if (val >> b) & 1:
+                out[i, b] = 1
+    return out
+
+@njit(parallel=True, fastmath=True, cache=True)
+def total_sum_by_table(
+    states: np.ndarray,
+    sum_table: np.ndarray,
+    n_modes: int,
+    zero_idx: int
+):
+    n_states = states.shape[0]
+    labels = np.empty(n_states, dtype=np.int64)
+
+    for i in prange(n_states):
+        state = states[i]
+        current_val = zero_idx
+        for mode_idx in range(n_modes):
+            if (state >> mode_idx) & 1:
+                current_val = sum_table[current_val, mode_idx]
+        labels[i] = current_val
+    
+    return labels

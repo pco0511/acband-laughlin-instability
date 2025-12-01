@@ -78,29 +78,11 @@ class DiscreteFermionicFockSpace:
     @property
     def dense_operator_size(self) -> int:
         return ((self.dim) ** 2) * 16
-    
 
-
-    def decompose_sectors(self, labeling_fn:Callable[[int], int], sector_labels: list, pbar=False):
-        
-        @jax.vmap   
-        def batched_labeling(state):
-            return labeling_fn(state)
-
-        labels = np.empty(self.dim, dtype=int)
-        
-        if pbar:
-            batch_slices = tqdm(list(range(0, self.dim, LARGE_BATCH_SIZE)))
-        else:
-            batch_slices = range(0, self.dim, LARGE_BATCH_SIZE)
-
-        for i in batch_slices:
-            state_batch = self.states[i:i+LARGE_BATCH_SIZE]
-            labels[i:i+LARGE_BATCH_SIZE] = batched_labeling(state_batch)
-
+    def decompose_sector_by_labels(self, state_labels, sector_labels):
         sector_dict = {}
         for sector_idx, sector_label in enumerate(sector_labels):
-            basis_indices = np.where(labels == sector_idx)[0]
+            basis_indices = np.where(state_labels == sector_idx)[0]
             sector_dict[sector_label] = Sector(
                 full_hilb=self,
                 sector_label=sector_label,
@@ -108,6 +90,22 @@ class DiscreteFermionicFockSpace:
             )
         return sector_dict
     
+    def decompose_sectors(self, labeling_fn:Callable[[int], int], sector_labels: list, pbar=False):
+        batched_labeling = jax.jit(jax.vmap(labeling_fn))
+        labels = np.empty(self.dim, dtype=int)
+        
+        if pbar:
+            batch_slices = tqdm(list(range(0, self.dim, LARGE_BATCH_SIZE)), desc="labeling sectors")
+        else:
+            batch_slices = range(0, self.dim, LARGE_BATCH_SIZE)
+
+        for i in batch_slices:
+            state_batch = self.states[i:i+LARGE_BATCH_SIZE]
+            labels[i:i+LARGE_BATCH_SIZE] = batched_labeling(state_batch)
+
+        return self.decompose_sector_by_labels(labels, sector_labels)
+    
+
     # def number_sectors(self) -> int:
     #     pass
 

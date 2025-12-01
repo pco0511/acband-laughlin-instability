@@ -3,10 +3,18 @@ from typing import Callable
 
 import numpy as np
 
+from tqdm.auto import tqdm, trange
+
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
+
 from .qm_utils.lattice.lattice import Lattice2D
 from .qm_utils.lattice.brillouin_zone import BrillouinZone2D
 
 from einops import einsum, rearrange, pack
+
+from numba import njit, prange
 
 
 def eta_factors(
@@ -168,15 +176,60 @@ def LLL_form_factors(
     ff_k1_k2_g = ff_k1_k2_g_flatten.reshape(bz.N_s, bz.N_s, *g_batch_shape)  # shape: (N_s, N_s, ...)
     return ff_k1_k2_g
 
+@njit(parallel=True, fastmath=True, cache=True)
+def _compute_lambda_kernel(
+    G_coords: np.ndarray,       # (N_grid, N_grid, 2) integers
+    ff_k_p_g: np.ndarray,       # (N_s, N_s, res, res) complex128
+    wg_window: np.ndarray,      # (window_size, window_size) - pre-sliced wg
+    normalizations: np.ndarray, # (N_s,)
+    G_radius: int
+):
+    N_grid = G_coords.shape[0]
+    N_s = ff_k_p_g.shape[0]
+    
+    Lambda_k_p_G = np.zeros((N_grid, N_grid, N_s, N_s), dtype=np.complex128)
+    
+    win_h = wg_window.shape[0]
+    win_w = wg_window.shape[1]
+
+    total_tasks = N_grid * N_grid
+
+    for task_idx in prange(total_tasks):
+        i = task_idx // N_grid
+        j = task_idx % N_grid
+
+        m = G_coords[i, j, 0]
+        n = G_coords[i, j, 1]
+        
+        start1 = G_radius + m
+        start2 = G_radius + n
+        
+        for k in range(N_s):
+            for p in range(N_s):
+                val = 0.0 + 0.0j
+                
+                for x in range(win_h):
+                    ff_x = start1 + x
+                    for y in range(win_w):
+                        ff_y = start2 + y
+                        val += ff_k_p_g[k, p, ff_x, ff_y] * wg_window[x, y]
+                        
+                Lambda_k_p_G[i, j, k, p] = normalizations[k] * normalizations[p] * val
+                    
+    return Lambda_k_p_G
+
+
 def acband_form_factors(
     bz: BrillouinZone2D,
     lB: float,
     K_func: Callable[[np.ndarray], np.ndarray],
     fourier_resolution: int, # 2^n is preferred
     G_radius: int,
-    pbar: bool=False,
+    pbar: bool=None,
     eps: float=1e-10
 ) -> tuple[np.ndarray, np.ndarray]:
+    if pbar is not None:
+        print("pbar argument is removed")
     # compute \Lambda^{k, p}_G
     g_coords, wg = wg_fourier_components(
         K_func, bz.lattice, fourier_resolution, flatten=False
@@ -192,34 +245,15 @@ def acband_form_factors(
     N_grid = 2 * G_radius + 1
     G_coords = np.indices((N_grid, N_grid)).transpose(1, 2, 0) - G_radius
     
-    Lambda_k_p_G = np.zeros((N_grid, N_grid, bz.N_s, bz.N_s), dtype=np.complex128)
+    wg_window = wg[G_radius:-G_radius, G_radius:-G_radius]
 
-    if pbar:
-        from tqdm import tqdm
-        G_indices = tqdm(list(itertools.product(range(N_grid), repeat=2)), desc="Computing AC band form factors")
-    else:
-        G_indices = itertools.product(range(N_grid), repeat=2)
-        
-    for i, j in G_indices:
-        m, n = G_coords[i, j]
-        start1 = G_radius + m
-        stop1 = fourier_resolution - G_radius + m
-        g_plus_G_slice_1 = slice(start1, stop1)
-        
-        start2 = G_radius + n
-        stop2 = fourier_resolution - G_radius + n
-        g_plus_G_slice_2 = slice(start2, stop2)
-        
-        ff_k_p_g_plus_G = ff_k_p_g[:, :, g_plus_G_slice_1, g_plus_G_slice_2]
-        N_k = normalizations[:, None]
-        N_p = normalizations[None, :]
-        unnormed = einsum(
-            ff_k_p_g_plus_G,
-            wg[G_radius:-G_radius, G_radius:-G_radius],
-            "k p m n, m n -> k p"
-        )
-        Lambda_k_p_G[i, j, :, :] = N_k * N_p * unnormed
-    
+    Lambda_k_p_G = _compute_lambda_kernel(
+        G_coords, 
+        ff_k_p_g, 
+        wg_window, 
+        normalizations, 
+        G_radius
+    )
     return G_coords, Lambda_k_p_G
 
 def interaction_matrix(

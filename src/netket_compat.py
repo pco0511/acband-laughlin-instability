@@ -2,16 +2,26 @@ from math import comb
 import numpy as np
 import scipy
 import jax
+jax.config.update("jax_enable_x64", True)
+import logging
+logger = logging.getLogger("jax._src.xla_bridge")
+logger.setLevel(logging.ERROR)
+from threadpoolctl import threadpool_limits
+
+
 import jax.numpy as jnp
 import netket as nk
 from netket.utils import struct
 from netket.operator import FermionOperator2ndJax
 from einops import rearrange
-import tqdm
+from tqdm.auto import tqdm
+
+from numba import njit, prange
+from joblib import Parallel, delayed
 
 from .qm_utils.lattice.brillouin_zone import BrillouinZone2D
 from .qm_utils.fermion.fermionic_fock import Sector
-from .qm_utils.fermion.fermion_utils import bitset_to_array, array_to_bitset
+from .qm_utils.fermion.fermion_utils import bitset_to_array, array_to_bitset, bitsets_to_array_numba
 
 
 def sum_indices(initial, indices, sum_table):
@@ -101,41 +111,126 @@ def check_ordering(full_fock: nk.hilbert.SpinOrbitalFermions, number_fixed: nk.h
     assert next(states_number_fixed, None) is None, "Not all states in number-fixed sector were matched"
     return True
 
+@njit(fastmath=True, cache=True)
+def _numba_array_to_index_search(x_prime_batch, basis_labels):
+    n_items, n_modes = x_prime_batch.shape
+    indices = np.empty(n_items, dtype=np.int64)
+
+    for i in range(n_items):
+        val = 0
+        for b in range(n_modes):
+            if x_prime_batch[i, b] != 0:
+                val += (1 << b)
+        idx = np.searchsorted(basis_labels, val)
+        indices[i] = idx
+    
+    return indices
+
+def _process_batch(
+    start_idx: int,
+    batch_size: int,
+    codomain_labels: np.ndarray, # Read-only, shared memory efficient on Linux
+    domain_labels: np.ndarray,   # Read-only
+    discrete_op,                 # The Operator Object
+    n_modes: int
+):
+    batch_labels = codomain_labels[start_idx : start_idx + batch_size]
+    actual_batch_size = len(batch_labels)
+    x_batch = bitsets_to_array_numba(batch_labels, n_modes)
+    local_sections = np.empty(actual_batch_size, dtype=np.int32)
+    x_prime_batch, mels_batch = discrete_op.get_conn_flattened(x_batch, local_sections)
+    indices_batch = _numba_array_to_index_search(x_prime_batch, domain_labels)
+    row_nnz = np.diff(local_sections, prepend=0)
+    return mels_batch, indices_batch, row_nnz
+
 def csr_from_nk_fermion_op(
     discrete_op: FermionOperator2ndJax,
     domain_sector: Sector,
     codomain_sector: Sector,
-    batch_size: int = 65536,
+    batch_size: int=4096,
+    n_jobs: int=-1,
     pbar: bool = False
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    vectorized_bitset_to_array = jax.vmap(bitset_to_array, in_axes=(0, None))
-    vectorized_array_to_bitset = jax.vmap(array_to_bitset, in_axes=(0,))
-    mels = []
-    indices = []
-    indptr = np.empty(codomain_sector.dim + 1, dtype=np.int32)
-    indptr[0] = 0
+) -> scipy.sparse.csr_matrix:
+    n_total = codomain_sector.dim
+    starts = range(0, n_total, batch_size)
+
     if pbar:
-        iterator = tqdm.trange(0, codomain_sector.dim, batch_size)
+        task_iterator = tqdm(starts, desc="Building CSR matrix")
     else:
-        iterator = range(0, codomain_sector.dim, batch_size)
-    for i in iterator:
-        x_batch = vectorized_bitset_to_array(
-            codomain_sector.basis_labels[i:i+batch_size], codomain_sector.full_hilb.n_modes
+        task_iterator = starts
+
+    with threadpool_limits(limits=1, user_api="blas"):
+        results = Parallel(n_jobs=n_jobs, return_as="generator")(
+            delayed(_process_batch)(
+                start,
+                batch_size,
+                codomain_sector.basis_labels,
+                domain_sector.basis_labels,
+                discrete_op,
+                codomain_sector.full_hilb.n_modes
+            )
+            for start in task_iterator
         )
-        sections = indptr[i + 1:i + 1 + batch_size]
-        x_prime_batch, mels_batch = discrete_op.get_conn_flattened(x_batch, sections)
-        x_int_batch = vectorized_array_to_bitset(x_prime_batch)
-        indices_batch = np.searchsorted(domain_sector.basis_labels, x_int_batch)
-        sections += indptr[i]
-        mels.append(mels_batch)
-        indices.append(indices_batch)
+
+        all_mels = []
+        all_indices = []
+        all_row_nnz = []
+        for mels_batch, indices_batch, row_nnz in results:
+            all_mels.append(mels_batch)
+            all_indices.append(indices_batch)
+            all_row_nnz.append(row_nnz)
+
+    data = np.concatenate(all_mels)
+    indices = np.concatenate(all_indices)
+    row_nnz = np.concatenate(all_row_nnz)
     
-    mels = np.concatenate(mels)
-    indices = np.concatenate(indices)
+    indptr = np.zeros(n_total + 1, dtype=np.int32)
+    np.cumsum(row_nnz, out=indptr[1:])
 
     return scipy.sparse.csr_matrix(
-        (mels, indices, indptr), 
+        (data, indices, indptr),
         shape=(codomain_sector.dim, domain_sector.dim)
     )
+
+
+    # vectorized_bitset_to_array = jax.vmap(bitset_to_array, in_axes=(0, None))
+    # vectorized_array_to_bitset = jax.vmap(array_to_bitset, in_axes=(0,))
+    # mels = []
+    # indices = []
+    # indptr = np.empty(codomain_sector.dim + 1, dtype=np.int32)
+    # indptr[0] = 0
+    # nnz = 0
+    # real_nnz = 0
+
+    # if pbar:
+    #     iterator = tqdm.trange(0, codomain_sector.dim, batch_size)
+    # else:
+    #     iterator = range(0, codomain_sector.dim, batch_size)
+
+    # for i in iterator:
+    #     x_batch = vectorized_bitset_to_array(
+    #         codomain_sector.basis_labels[i:i+batch_size], codomain_sector.full_hilb.n_modes
+    #     )
+    #     sections = indptr[i + 1:i + 1 + batch_size]
+    #     x_prime_batch, mels_batch = discrete_op.get_conn_flattened(x_batch, sections)
+    #     x_int_batch = vectorized_array_to_bitset(x_prime_batch)
+    #     indices_batch = np.searchsorted(domain_sector.basis_labels, x_int_batch)
+    #     mels.append(mels_batch)
+    #     indices.append(indices_batch)
+    #     nnz += mels_batch.shape[0]
+    #     real_nnz += np.sum(np.abs(mels_batch) > 1e-12)
+    #     if pbar:
+    #         iterator.set_postfix(nnz=nnz, real_nnz=real_nnz)
+    
+    # for i in range(0, codomain_sector.dim, batch_size):
+    #     indptr[i + 1:i + 1 + batch_size] += indptr[i]
+
+    # mels = np.concatenate(mels)
+    # indices = np.concatenate(indices)
+
+    # return scipy.sparse.csr_matrix(
+    #     (mels, indices, indptr), 
+    #     shape=(codomain_sector.dim, domain_sector.dim)
+    # )
 
     
