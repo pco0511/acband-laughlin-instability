@@ -108,21 +108,6 @@ def csr_from_nk_fermion_op(
     batch_size: int = 65536,
     pbar: bool = False
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    # x = jax.vmap(bitset_to_array, in_axes=(0, None))(
-    #     codomain_sector.basis_labels, codomain_sector.full_hilb.n_modes
-    # )
-    # sections = np.empty(codomain_sector.dim, dtype=np.int32)
-    # x_prime, mels = discrete_op.get_conn_flattened(x, sections)
-    # bitsets = jax.vmap(array_to_bitset)(x_prime)
-    # numbers = np.searchsorted(domain_sector.basis_labels, bitsets)
-    # sections1 = np.empty(sections.size + 1, dtype=np.int32)
-    # sections1[1:] = sections
-    # sections1[0] = 0
-    # return scipy.sparse.csr_matrix(
-    #     (mels, numbers, sections1), 
-    #     shape=(codomain_sector.dim, domain_sector.dim)
-    # )
-
     vectorized_bitset_to_array = jax.vmap(bitset_to_array, in_axes=(0, None))
     vectorized_array_to_bitset = jax.vmap(array_to_bitset, in_axes=(0,))
     mels = []
@@ -130,7 +115,7 @@ def csr_from_nk_fermion_op(
     indptr = np.empty(codomain_sector.dim + 1, dtype=np.int32)
     indptr[0] = 0
     if pbar:
-        iterator = tqdm.tqdm(list(range(0, codomain_sector.dim, batch_size)))
+        iterator = tqdm.trange(0, codomain_sector.dim, batch_size)
     else:
         iterator = range(0, codomain_sector.dim, batch_size)
     for i in iterator:

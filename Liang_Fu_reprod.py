@@ -1,36 +1,48 @@
 import argparse
 from datetime import datetime
 from functools import partial
-import itertools
 import time
 import os
 import pickle
 
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy
+
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
 
 import netket as nk
+from netket.hilbert import SpinOrbitalFermions
 from netket.operator import FermionOperator2nd
 from netket.experimental.operator import ParticleNumberConservingFermioperator2nd
 
 from src.qm_utils.lattice.lattice import Lattice2D
-from src.netket_compat import get_sector_constraints
+from src.netket_compat import csr_from_nk_fermion_op
 from src.acband import (
     acband_form_factors, 
     interaction_matrix, 
     K_func1,
     interaction_hamiltonian_terms
 )
+from src.qm_utils.fermion.fermionic_fock import DiscreteFermionicFockSpace
+from src.qm_utils.fermion.fermion_utils import (
+    bitset_to_mode_indices,
 
+)
 from brillouin_zones import construct_brillouin_zones
+
 
 parser = argparse.ArgumentParser(description="ED parameters")
 parser.add_argument("--save_name", type=str, default="main", help="Base name for saving figures and data")
-parser.add_argument("--n_sites", "-N", type=int, choices=[25, 27, 28], default=27, help="Number of lattice sites (N_s); must be one of {25, 27, 28}")
+parser.add_argument("--n_sites", "-N", type=int, default=27, help="Number of lattice sites (N_s); must be one of {25, 27, 28}")
 parser.add_argument("--n_fermions", "-F", type=int, default=18, help="Number of fermions (N_f)")
 parser.add_argument("--K", type=float, default=0.8, help="K parameter for K_func")
 parser.add_argument("--fourier_resolution", type=int, default=256, help="Fourier resolution for AC band form factors")
 parser.add_argument("--G_radius", type=int, default=64, help="G vector radius for AC band form factors")
+parser.add_argument("--num_evecs", type=int, default=30, help="Number of eigenvalues/eigenvectors to compute per sector")
+parser.add_argument("--gamma_only", action="store_true", help="If set, only diagonalize the Gamma sector")
 args = parser.parse_args()
 
 N_s = args.n_sites
@@ -60,21 +72,38 @@ lattice = Lattice2D(np.stack([a1, a2]))
 recip_lattice = lattice.reciprocal()
 
 bz = construct_brillouin_zones(lattice)
-
+if N_s not in bz:
+    raise ValueError(f"Brillouin zone for N_s={N_s} not found. Available: {list(bz.keys())}")
 bz_N_s = bz[N_s]
 
 # Many-body Hilbert spaces
-constraints = get_sector_constraints(bz_N_s, N_f)
-hilbs = [
-    nk.hilbert.SpinOrbitalFermions(
-        n_orbitals=N_s, n_fermions=N_f, constraint=constraint
-    ) for constraint in constraints
-]
+full_hilb = DiscreteFermionicFockSpace(mode_labels=list(range(N_s)), particle_numbers=N_f)
 
-for k_index, sector in enumerate(hilbs):
-    print(f"Constructing Sector {k_index}:")
-    print(f"  Total Momentum: {bz_N_s[k_index]}")
-    print(f"  Dimension: {sector.n_states}")
+zero_idx = jnp.array(bz_N_s.zero())
+sum_table_jax = jnp.array(bz_N_s.sum_table)
+
+def sum_indices(indices):
+    def scan_fn(carry, x):
+        new_carry = sum_table_jax[carry, x]
+        return new_carry, None
+    init_carry = zero_idx
+    final_carry, _ = jax.lax.scan(scan_fn, init_carry, indices)
+    return final_carry
+
+def labeling_fn(state_int):
+    mode_indices = bitset_to_mode_indices(state_int, n_modes=N_s, max_n_particles=N_f, fill_value=zero_idx)
+    summed_index = sum_indices(mode_indices)
+    return summed_index
+
+labels = list(range(N_s))
+print("Decomposing sectors...")
+start = time.time()
+sectors = full_hilb.decompose_sectors(labeling_fn, labels, pbar=True)
+end = time.time()
+print(f"  Decomposed into {len(sectors)} sectors in {end - start:.2f} seconds")
+for label, sector in sectors.items():
+    print(f"    Sector {label}: dimension {sector.dim}")
+
  
 b1, b2 = lattice.reciprocal_lattice_vectors
 b3 = -(b1 + b2)
@@ -113,31 +142,40 @@ int_mat = interaction_matrix(
 end = time.time()
 print(f"Interaction matrix computed in {end - start:.2f} seconds")
 
-hamiltonians = []
-for sector_index, sector in enumerate(hilbs):
-    terms, weights = interaction_hamiltonian_terms(bz_N_s, int_mat)
-    H = FermionOperator2nd(
-        sector,
-        terms,
-        weights
-    )
-    H = ParticleNumberConservingFermioperator2nd.from_fermionoperator2nd(H)
-    hamiltonians.append(H)
+nk_kilb = SpinOrbitalFermions(
+    n_orbitals=N_s, s=None, n_fermions=N_f
+)
+terms, weights = interaction_hamiltonian_terms(bz_N_s, int_mat)
+H = FermionOperator2nd(
+    nk_kilb,
+    terms,
+    weights
+)
+H = ParticleNumberConservingFermioperator2nd.from_fermionoperator2nd(H)
 
 eigenvalues = []
 eigenvectors = []
 com_momentums = []
 
-for k_index, (sector, H) in enumerate(zip(hilbs, hamiltonians)):
-    print(f"Diagonalizing sector {k_index} with dimension {sector.n_states}...")
+gamma_idx = bz_N_s.zero()
+for k_idx, (label, sector) in enumerate(sectors.items()):
+    if args.gamma_only and label != gamma_idx:
+        continue
+    print(f"Diagonalizing sector {label} with dimension {sector.dim}...")
     start = time.time()
-    evals, evecs = nk.exact.lanczos_ed(H, k=30, compute_eigenvectors=True)
+    sparse_rep = csr_from_nk_fermion_op(
+        H, sector, sector, batch_size=65536, pbar=True
+    )
+    end = time.time()
+    print(f"  Sparse matrix constructed in {end - start:.2f} seconds")
+
+    start = time.time()
+    evals, evecs = scipy.sparse.linalg.eigsh(sparse_rep, k=args.num_evecs, which='SA', return_eigenvectors=True)
     end = time.time()
     print(f"  Diagonalized in {end - start:.2f} seconds")
     eigenvalues.append(evals)
     eigenvectors.append(evecs)
-    com_momentums.append(bz_N_s.k_points[k_index])
-
+    com_momentums.append(bz_N_s.k_points[k_idx])
 k_coms_flatten = []
 energies_flatten = []
 

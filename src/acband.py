@@ -229,8 +229,8 @@ def interaction_matrix(
     V: Callable[[np.ndarray], np.ndarray],
 ):
     G_vecs = bz.reciprocal_lattice.get_points(fourier_G_coords)
-    start_idx = 1
-    end_idx = fourier_G_coords.shape[0] - 1
+    start_idx = 2
+    end_idx = fourier_G_coords.shape[0] - 2
     G_vecs_center = G_vecs[start_idx:end_idx, start_idx:end_idx]
 
     N_s = bz.n_samples
