@@ -163,11 +163,12 @@ for k_idx, (label, sector) in enumerate(sectors.items()):
     print("  Constructing sparse representation:")
     start = time.time()
     sparse_rep = csr_from_nk_fermion_op(
-        H, sector, sector, batch_size=512, pbar=True, n_jobs=64
+        H, sector, sector, batch_size=512, pbar=True, n_jobs=32
     )
     end = time.time()
     print(f"  Sparse matrix constructed in {end - start:.2f} seconds")
 
+    print("  Diagonalizing...")
     start = time.time()
     evals, evecs = scipy.sparse.linalg.eigsh(sparse_rep, k=args.num_evecs, which='SA', return_eigenvectors=True)
     end = time.time()

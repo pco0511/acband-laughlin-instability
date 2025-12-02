@@ -175,11 +175,17 @@ def csr_from_nk_fermion_op(
         all_mels = []
         all_indices = []
         all_row_nnz = []
+
+        nnz = 0
         for mels_batch, indices_batch, row_nnz in results:
+            nnz += mels_batch.shape[0]
             all_mels.append(mels_batch)
             all_indices.append(indices_batch)
             all_row_nnz.append(row_nnz)
 
+    if pbar:
+        print(f"Total non-zeros: {nnz}")
+        
     data = np.concatenate(all_mels)
     indices = np.concatenate(all_indices)
     row_nnz = np.concatenate(all_row_nnz)
