@@ -73,7 +73,9 @@ def K_func2(
         dists_square = np.sum(diffs ** 2, axis=-1) / (sigma ** 2)
         dists = np.sqrt(dists_square) 
 
-        chis = np.where(dists < 1, (dists_square - 1) / 2, np.log(dists))
+        with np.errstate(divide='ignore', invalid='ignore'):
+            chis = np.where(dists < 1, (dists_square - 1) / 2, np.log(dists))
+        
         k_vals_calc += np.sum(chis, axis=1)
     
     n = 1 / (np.abs(a1[0] * a2[1] - a1[1] * a2[0]))
