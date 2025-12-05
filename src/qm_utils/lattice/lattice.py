@@ -207,7 +207,8 @@ class Lattice2D:
         wigner_seitz_vec_batch = np.take_along_axis(dist_vectors, min_index_expanded, axis=-2)
         
         closest_lattice_coord = np.squeeze(closest_lattice_coord_batch, axis=-2)
-        closest_lattice_coord = einsum(conv_mat, closest_lattice_coord, 'i j, ... j -> ... i')
+        if inversion_symmetric:
+            closest_lattice_coord = einsum(conv_mat, closest_lattice_coord, 'i j, ... j -> ... i')
         wigner_seitz_vec = np.squeeze(wigner_seitz_vec_batch, axis=-2)
 
         return closest_lattice_coord.astype(int), wigner_seitz_vec
@@ -217,7 +218,7 @@ class Lattice2D:
         self,
         vec: np.ndarray,
         precision: int=12,
-        inversion_symmetric: bool=True
+        inversion_symmetric: bool=False
     ):
         """
         Divide the vector into lattice coordinate and offset on Wigner-Seitz cell.
@@ -246,7 +247,7 @@ class Lattice2D:
         self,
         vec: np.ndarray,
         precision: int=12,
-        inversion_symmetric: bool=True
+        inversion_symmetric: bool=False
     ):
         """
         Divide the vector into reciprocal lattice coordinate and offset on First Brillouin zone.

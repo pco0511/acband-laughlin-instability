@@ -255,18 +255,18 @@ def acband_form_factors(
         wg_window, 
         normalizations, 
         G_radius
-    )
+    ) # shape: (N_grid, N_grid, N_s, N_s)
     return G_coords, Lambda_k_p_G
 
 def interaction_matrix(
     bz: BrillouinZone2D,
-    fourier_G_coords: np.ndarray,
+    G_coords: np.ndarray,
     ac_ff: np.ndarray,
     V: Callable[[np.ndarray], np.ndarray],
 ):
-    G_vecs = bz.reciprocal_lattice.get_points(fourier_G_coords)
+    G_vecs = bz.reciprocal_lattice.get_points(G_coords)
     start_idx = 2
-    end_idx = fourier_G_coords.shape[0] - 2
+    end_idx = G_coords.shape[0] - 2
     G_vecs_center = G_vecs[start_idx:end_idx, start_idx:end_idx]
 
     N_s = bz.n_samples
@@ -333,6 +333,71 @@ def interaction_hamiltonian_terms(
             ((k1, 1), (k2, 1), (k3, 0), (k4, 0))
         )
     return terms, weights
+
+def hole_hartree_self_energies(
+    bz: BrillouinZone2D,
+    G_vecs: np.ndarray,
+    ac_ff: np.ndarray,
+    V: Callable[[np.ndarray], np.ndarray],
+) -> np.ndarray:
+    N_s = bz.n_samples
+    A = bz.lattice.unit_cell_area * N_s
+
+    V_G = V(G_vecs) # shape: (N_grid, N_grid)
+    k_indices = np.arange(N_s)
+    rho_G = ac_ff[:, :, k_indices, k_indices] # taking diagonal elements
+    sum_rho_minus_G_k_prime = np.sum(rho_G, axis=2)[::-1, ::-1] # shape: (N_grid, N_grid)
+    k_indeps = V_G * sum_rho_minus_G_k_prime # shape: (N_grid, N_grid)
+    hartree_energies = (1 / A) * einsum(
+        k_indeps, rho_G, "m n, m n k -> k"
+    )
+
+    assert np.all(np.abs(np.imag(hartree_energies)) < 1e-10), "Hartree energies have significant imaginary parts"
+
+    return np.real(hartree_energies) # shape: (N_s,)
+
+def hole_fock_self_energies(
+    bz: BrillouinZone2D,
+    G_vecs: np.ndarray,
+    ac_ff: np.ndarray,
+    V: Callable[[np.ndarray], np.ndarray],
+) -> np.ndarray:
+    N_s = bz.n_samples
+    A = bz.lattice.unit_cell_area * N_s    
+    k_vecs = bz.k_points # shape: (N_s, 2)
+    fock_energies = np.zeros((N_s,), dtype=np.complex128)
+    for k in range(N_s):
+        k_vec = k_vecs[k, :] # shape: (2,)
+        k_minus_kp_minus_G = k_vec[None, None, None, :] - k_vecs[None, None, :, :] - G_vecs[:, :, None, :] # shape: (N_grid, N_grid, N_s, 2)
+        V_q = V(k_minus_kp_minus_G) # shape: (N_grid, N_grid, N_s)
+        Lambda_k_kp_G_abs_square = np.abs(ac_ff[:, :, k, :]) ** 2 # shape: (N_grid, N_grid, N_s)
+        fock_energies[k] = - (1 / A) * np.sum(
+            V_q * Lambda_k_kp_G_abs_square,
+        )
+    assert np.all(np.abs(np.imag(fock_energies)) < 1e-10), "Fock energies have significant imaginary parts"
+    return np.real(fock_energies) # shape: (N_s,)
+
+def hole_dispersion(
+    bz: BrillouinZone2D,
+    G_coords: np.ndarray,
+    ac_ff: np.ndarray,
+    V: Callable[[np.ndarray], np.ndarray],
+) -> np.ndarray:
+    G_vecs = bz.reciprocal_lattice.get_points(G_coords)
+    assert G_coords.shape[0] == G_coords.shape[1]
+    N_grid = G_coords.shape[0]
+    G_radius = (N_grid - 1) // 2
+    assert G_radius * 2 + 1 == N_grid
+    assert np.all(np.abs(G_vecs[G_radius, G_radius]) < 1e-12)
+
+    hartree_energies = hole_hartree_self_energies(
+        bz, G_vecs, ac_ff, V
+    )
+    fock_energies = hole_fock_self_energies(
+        bz, G_vecs, ac_ff, V
+    )
+    return -(hartree_energies + fock_energies)
+
 
 if __name__ == "__main__":
     from functools import partial
@@ -410,3 +475,4 @@ if __name__ == "__main__":
     
     print(f"N = 28 AC band form factors computed in {end - start:.2f} seconds")
     print(f"{ac_ff_28.shape=}")
+
