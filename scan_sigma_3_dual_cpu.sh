@@ -1,5 +1,7 @@
 #!/bin/bash
 
+trap "echo ' -> KeyboardInterrupt: Killing all processes...'; kill 0" SIGINT
+
 echo "Scanning m=3..."
 export PYTHONUNBUFFERED=1
 

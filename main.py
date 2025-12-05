@@ -44,7 +44,7 @@ total_start = time.time()
 
 parser = argparse.ArgumentParser(description="ED parameters")
 parser.add_argument("--save_name", type=str, default="main", help="Base name for saving figures and data")
-parser.add_argument("--n_sites", type=int, choices=[25, 27, 28], default=27, help="Number of lattice sites (N_s); must be one of {25, 27, 28}")
+parser.add_argument("--n_sites", type=int, default=27, help="Number of lattice sites (N_s); must be one of {25, 27, 28}")
 parser.add_argument("--n_fermions", type=int, default=9, help="Number of fermions (N_f)")
 parser.add_argument("--sum_radius", type=float, default=10.0, help="Sum radius for attached solenoids")
 parser.add_argument("--sigma", type=float, required=True, help="Sigma for attached solenoids")
@@ -196,7 +196,7 @@ for k_idx, (label, sector) in enumerate(sectors.items()):
         print("  Constructing sparse representation:")
     start = time.time()
     sparse_rep = csr_from_nk_fermion_op(
-        H, sector, sector, batch_size=512, pbar=True, n_jobs=32
+        H, sector, sector, batch_size=512, pbar=(not quiet) and (not simple_out), n_jobs=16
     )
     end = time.time()
     if not quiet and not simple_out:

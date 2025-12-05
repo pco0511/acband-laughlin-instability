@@ -29,13 +29,19 @@ def construct_brillouin_zones(lattice: Lattice2D) -> dict[int, BrillouinZone2D]:
         rot = -np.arccos((normb1 ** 2 + normp1 ** 2 - distb1p1 ** 2) / (2 * normb1 * normp1))
         sample_lattice_new = sample_lattice_27.transformed(scale=scale, rot=rot)
         return BrillouinZone2D(lattice, sample_lattice_new)
-    # N = 28 grid
-    p1 = b1 + t3
-    bz[28] = construct_scaled_rotated_bz(p1)
+    
+    # N = 21 grid
+    p1 = 4 * t1 + t2
+    bz[21] = construct_scaled_rotated_bz(p1)
 
+    
     # N = 25 grid
     p1 = 5 * t1
     bz[25] = construct_scaled_rotated_bz(p1)
+    
+    # N = 28 grid
+    p1 = b1 + t3
+    bz[28] = construct_scaled_rotated_bz(p1)
 
     # N = 36 grid
     p1 = 6 * t1
