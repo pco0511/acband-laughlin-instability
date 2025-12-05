@@ -267,7 +267,7 @@ def _compute_lambda(
                     
     return Lambda_k_p_G
 
-def _compute_row_fft(
+def _compute_row_old(
     k_idx, 
     ff_row_k,       # (N_s, res, res) - k번째 행 전체
     wg_window,      # (win, win)
@@ -287,7 +287,7 @@ def _compute_row_fft(
     return k_idx, row_results
 
 
-def _compute_lambda_fft(
+def _compute_lambda_old(
     G_coords: np.ndarray,       # (N_grid, N_grid, 2) integers
     ff_k_p_g: np.ndarray,       # (N_s, N_s, res, res) complex128
     wg_window: np.ndarray,      # (window_size, window_size) - pre-sliced wg
@@ -304,7 +304,7 @@ def _compute_lambda_fft(
 
     with threadpool_limits(limits=8, user_api='blas'):
         results = Parallel(n_jobs=16)(
-            delayed(_compute_row_fft)(
+            delayed(_compute_row_old)(
                 k, 
                 ff_k_p_g[k],
                 wg_window, 
@@ -322,38 +322,31 @@ def _compute_lambda_fft(
     return Lambda_k_p_G
 
 
-def _compute_row_batch_fft_explicit(
+def _compute_row_batch_fft(
     k_idx, 
-    ff_row_k,
-    wg_fft_conj,
-    norm_k, 
-    all_norm_p,
-    target_shape
+    ff_row_k_batch, # (N_s, res_h, res_w)
+    wg_fft_conj,    # (fft_h, fft_w)
+    norm_k_val, 
+    all_norm_p,     # (N_s,)
+    valid_h, 
+    valid_w
 ):
-    fft_h, fft_w = wg_fft_conj.shape
-    input_fft = scipy.fft.fft2(ff_row_k, s=(fft_h, fft_w), axes=(-2, -1), workers=1)
+    input_fft = scipy.fft.fft2(
+        ff_row_k_batch, 
+        s=wg_fft_conj.shape,
+        axes=(-2, -1), 
+        workers=1
+    )
     input_fft *= wg_fft_conj
-    
-    correlated = scipy.fft.ifft2(input_fft, axes=(-2, -1), workers=1)
-    
-    res_h, res_w = target_shape
-    wg_h = fft_h - (ff_row_k.shape[1] - res_h + 1) + 1 # 역산
-    wg_w = fft_w - (ff_row_k.shape[2] - res_w + 1) + 1
-    
-    out = correlated[:, :res_h, :res_w]
+    correlated_batch = scipy.fft.ifft2(input_fft, axes=(-2, -1), workers=1)
+    valid_result = correlated_batch[:, :valid_h, :valid_w]
 
-    orig_wg_h = ff_row_k.shape[1] - res_h + 1
-    orig_wg_w = ff_row_k.shape[2] - res_w + 1
+    factors = norm_k_val * all_norm_p
+    valid_result *= factors[:, None, None]
     
-    start_h = orig_wg_h - 1
-    start_w = orig_wg_w - 1
-    
-    out = correlated[:, start_h : start_h + res_h, start_w : start_w + res_w]
-    out *= (norm_k * all_norm_p)[:, None, None]
-    
-    return k_idx, out
+    return k_idx, valid_result
 
-def _compute_lambda_fft_explicit(
+def _compute_lambda_fft(
     G_coords: np.ndarray,       
     ff_k_p_g: np.ndarray,       # (N_s, N_s, 128, 128)
     wg_window: np.ndarray,      # (96, 96)
@@ -361,16 +354,17 @@ def _compute_lambda_fft_explicit(
     G_radius: int
 ):
     N_s = ff_k_p_g.shape[0]
-    res_in_h, res_in_w = ff_k_p_g.shape[2], ff_k_p_g.shape[3]
+    res_h, res_w = ff_k_p_g.shape[2], ff_k_p_g.shape[3]
     win_h, win_w = wg_window.shape
     
-    h_out = res_in_h - win_h + 1
-    w_out = res_in_w - win_w + 1
+    h_out = res_h - win_h + 1
+    w_out = res_w - win_w + 1
     
     N_grid = G_coords.shape[0]
-    
-    fft_h = scipy.fft.next_fast_len(res_in_h + win_h - 1)
-    fft_w = scipy.fft.next_fast_len(res_in_w + win_w - 1)
+    assert h_out == N_grid, f"Output shape mismatch: {h_out} vs {N_grid}"
+
+    fft_h = scipy.fft.next_fast_len(res_h + win_h - 1)
+    fft_w = scipy.fft.next_fast_len(res_w + win_w - 1)
     
     wg_padded = np.zeros((fft_h, fft_w), dtype=np.complex128)
     wg_padded[:win_h, :win_w] = wg_window
@@ -378,25 +372,24 @@ def _compute_lambda_fft_explicit(
     wg_fft_conj = np.conj(scipy.fft.fft2(wg_padded))
     
     with threadpool_limits(limits=1, user_api='blas'):
-        results = Parallel(n_jobs=128, prefer="threads")(
-            delayed(_compute_row_batch_fft_explicit)(
+        results = Parallel(n_jobs=32, prefer="threads")(
+            delayed(_compute_row_batch_fft)(
                 k, 
-                ff_k_p_g[k],        # (N_s, 128, 128) - View passed (no copy with threads)
-                wg_fft_conj,        # (fft_h, fft_w)
+                ff_k_p_g[k],
+                wg_fft_conj,
                 normalizations[k], 
                 normalizations,
-                (h_out, w_out)
+                h_out,
+                w_out
             )
             for k in range(N_s)
         )
-
+    
     Lambda_k_p_G = np.zeros((N_grid, N_grid, N_s, N_s), dtype=np.complex128)
 
     for k, row_res in results:
-        # row_res: (N_s, h_out, w_out)
-        # Target: (h_out, w_out, k, N_s) -> (h_out, w_out, k, :)
         Lambda_k_p_G[:, :, k, :] = row_res.transpose(1, 2, 0)
-        
+
     return Lambda_k_p_G
 
 def acband_form_factors(
@@ -430,8 +423,8 @@ def acband_form_factors(
     G_coords = np.indices((N_grid, N_grid)).transpose(1, 2, 0) - G_radius
     
     wg_window = wg[G_radius:-G_radius, G_radius:-G_radius]
-    if fft == "exp":
-        Lambda_k_p_G = _compute_lambda_fft_explicit(
+    if fft:
+        Lambda_k_p_G = _compute_lambda_fft(
             G_coords, 
             ff_k_p_g, 
             wg_window, 
@@ -439,22 +432,13 @@ def acband_form_factors(
             G_radius
         ) # shape: (N_grid, N_grid, N_s, N_s)
     else:
-        if fft:
-            Lambda_k_p_G = _compute_lambda_fft(
-                G_coords, 
-                ff_k_p_g, 
-                wg_window, 
-                normalizations, 
-                G_radius
-            ) # shape: (N_grid, N_grid, N_s, N_s)
-        else:
-            Lambda_k_p_G = _compute_lambda(
-                G_coords, 
-                ff_k_p_g, 
-                wg_window, 
-                normalizations, 
-                G_radius
-            ) # shape: (N_grid, N_grid, N_s, N_s)
+        Lambda_k_p_G = _compute_lambda(
+            G_coords, 
+            ff_k_p_g, 
+            wg_window, 
+            normalizations, 
+            G_radius
+        ) # shape: (N_grid, N_grid, N_s, N_s)
 
     return G_coords, Lambda_k_p_G
 
