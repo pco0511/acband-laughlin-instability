@@ -2,6 +2,7 @@ import itertools
 from typing import Callable
 
 import numpy as np
+from scipy.signal import correlate
 
 from tqdm.auto import tqdm, trange
 
@@ -15,7 +16,6 @@ from .qm_utils.lattice.brillouin_zone import BrillouinZone2D
 from einops import einsum, rearrange, pack
 
 from numba import njit, prange
-
 
 def eta_factors(
         g_coords: np.ndarray
@@ -68,9 +68,7 @@ def K_func2(
         dists_square = np.sum(diffs ** 2, axis=-1) / (sigma ** 2)
         dists = np.sqrt(dists_square) 
 
-        with np.errstate(divide='ignore', invalid='ignore'):
-            chis = np.where(dists < 1, (dists_square - 1) / 2, np.log(dists))
-        
+        chis = np.where(dists < 1, (dists_square - 1) / 2, np.log(dists))
         k_vals_calc += np.sum(chis, axis=1)
     
     n = 1 / (np.abs(a1[0] * a2[1] - a1[1] * a2[0]))
@@ -209,17 +207,38 @@ def _compute_lambda_kernel(
         for k in range(N_s):
             for p in range(N_s):
                 val = 0.0 + 0.0j
-                
                 for x in range(win_h):
                     ff_x = start1 + x
                     for y in range(win_w):
                         ff_y = start2 + y
                         val += ff_k_p_g[k, p, ff_x, ff_y] * wg_window[x, y]
-                        
                 Lambda_k_p_G[i, j, k, p] = normalizations[k] * normalizations[p] * val
                     
     return Lambda_k_p_G
 
+def _compute_lambda_kernel_fft(
+    G_coords: np.ndarray,       # (N_grid, N_grid, 2) integers
+    ff_k_p_g: np.ndarray,       # (N_s, N_s, res, res) complex128
+    wg_window: np.ndarray,      # (window_size, window_size) - pre-sliced wg
+    normalizations: np.ndarray, # (N_s,)
+    G_radius: int
+):
+    N_grid = G_coords.shape[0]
+    N_s = ff_k_p_g.shape[0]
+
+    Lambda_k_p_G = np.zeros((N_grid, N_grid, N_s, N_s), dtype=np.complex128)
+    for k in range(N_s):
+        for p in range(N_s):
+            corr_res = correlate(
+                ff_k_p_g[k, p], 
+                np.conj(wg_window), 
+                mode='valid', 
+                method='fft'
+            )
+            # Normalization
+            norm_factor = normalizations[k] * normalizations[p]
+            Lambda_k_p_G[:, :, k, p] = corr_res * norm_factor            
+    return Lambda_k_p_G
 
 def acband_form_factors(
     bz: BrillouinZone2D,
@@ -227,6 +246,8 @@ def acband_form_factors(
     K_func: Callable[[np.ndarray], np.ndarray],
     fourier_resolution: int, # 2^n is preferred
     G_radius: int,
+    *,
+    fft: bool=False,
     pbar: bool=None,
     eps: float=1e-10
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -248,14 +269,22 @@ def acband_form_factors(
     G_coords = np.indices((N_grid, N_grid)).transpose(1, 2, 0) - G_radius
     
     wg_window = wg[G_radius:-G_radius, G_radius:-G_radius]
-
-    Lambda_k_p_G = _compute_lambda_kernel(
-        G_coords, 
-        ff_k_p_g, 
-        wg_window, 
-        normalizations, 
-        G_radius
-    ) # shape: (N_grid, N_grid, N_s, N_s)
+    if fft:
+        Lambda_k_p_G = _compute_lambda_kernel_fft(
+            G_coords, 
+            ff_k_p_g, 
+            wg_window, 
+            normalizations, 
+            G_radius
+        ) # shape: (N_grid, N_grid, N_s, N_s)
+    else:
+        Lambda_k_p_G = _compute_lambda_kernel(
+            G_coords, 
+            ff_k_p_g, 
+            wg_window, 
+            normalizations, 
+            G_radius
+        ) # shape: (N_grid, N_grid, N_s, N_s)
     return G_coords, Lambda_k_p_G
 
 def interaction_matrix(
