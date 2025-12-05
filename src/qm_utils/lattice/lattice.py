@@ -218,7 +218,7 @@ class Lattice2D:
         self,
         vec: np.ndarray,
         precision: int=12,
-        inversion_symmetric: bool=False
+        inversion_symmetric: bool=True
     ):
         """
         Divide the vector into lattice coordinate and offset on Wigner-Seitz cell.
@@ -247,7 +247,7 @@ class Lattice2D:
         self,
         vec: np.ndarray,
         precision: int=12,
-        inversion_symmetric: bool=False
+        inversion_symmetric: bool=True
     ):
         """
         Divide the vector into reciprocal lattice coordinate and offset on First Brillouin zone.
