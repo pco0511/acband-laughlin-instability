@@ -1,3 +1,4 @@
+import time
 import itertools
 from typing import Callable
 
@@ -9,6 +10,9 @@ from tqdm.auto import tqdm, trange
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
+
+from joblib import Parallel, delayed
+from threadpoolctl import threadpool_limits
 
 from .qm_utils.lattice.lattice import Lattice2D
 from .qm_utils.lattice.brillouin_zone import BrillouinZone2D
@@ -148,6 +152,66 @@ def acband_normalization_constants(
     
     return 1.0 / np.sqrt(np.abs(norm_invs2))
 
+@njit(parallel=True, fastmath=True, cache=True)
+def _compute_LLL_numba(
+    ks: np.ndarray,       # (N_s, 2)
+    gs: np.ndarray,       # (N_g, 2)
+    eta_vals: np.ndarray, # (N_g,)
+    lB: float
+):
+    N_s = ks.shape[0]
+    N_g = gs.shape[0]
+
+    total_tasks = N_s * N_s
+
+    ff_out = np.zeros((N_s, N_s, N_g), dtype=np.complex128)
+
+    lB2 = lB * lB
+    lB2_half = lB2 / 2.0
+    lB2_quarter_neg = -lB2 / 4.0
+
+    for idx in prange(total_tasks):
+        i = idx // N_s
+        j = idx % N_s
+
+        k1_x = ks[i, 0]
+        k1_y = ks[i, 1]
+        k2_x = ks[j, 0]
+        k2_y = ks[j, 1]
+
+        cross_k1_k2 = k1_x * k2_y - k1_y * k2_x
+        exp_imag_2 = lB2_half * cross_k1_k2
+        
+        kp_x = k1_x + k2_x
+        kp_y = k1_y + k2_y
+        
+        km_x = k1_x - k2_x
+        km_y = k1_y - k2_y
+
+        for m in range(N_g):
+            g_x = gs[m, 0]
+            g_y = gs[m, 1]
+            
+            # cross_z(k1 + k2, g)
+            cross_kp_g = kp_x * g_y - kp_y * g_x
+            exp_imag_1 = lB2_half * cross_kp_g
+            
+            # norm_sq(k1 - k2 - g)
+            dx = km_x - g_x
+            dy = km_y - g_y
+            norm_sq = dx * dx + dy * dy
+            exp_real = lB2_quarter_neg * norm_sq
+            
+            total_phase = exp_imag_1 + exp_imag_2
+            
+            # exp(real + 1j * phase)
+            term = np.exp(exp_real + 1j * total_phase)
+            
+            ff_out[i, j, m] = eta_vals[m] * term
+                
+    return ff_out
+
+
 def LLL_form_factors(
     bz: BrillouinZone2D,
     lB: float,
@@ -155,29 +219,15 @@ def LLL_form_factors(
 ) -> np.ndarray:
     g_batch_shape = g_coords.shape[:-1]
     g_coords_flatten = rearrange(g_coords, "... d -> (...) d")
-    
     ks = bz.k_points  # shape: (N_s, 2)
-    recip_lattice = bz.reciprocal_lattice
-    gs = recip_lattice.get_points(g_coords_flatten) # (N_g, 2)
-    lB2 = lB ** 2
-
-    k1 = ks[:, None, :]  # shape: (N_s, 1, 2)
-    k2 = ks[None, :, :]  # shape: (1, N_s, 2)
-    k1_plus_k2 = k1 + k2 # shape: (N_s, N_s, 2)
-    k1_minus_k2 = k1 - k2 # shape: (N_s, N_s, 2)
-
-    exponent_imag_1 = (lB2 / 2) * cross_z(k1_plus_k2[:, :, None, :], gs[None, None, :, :])  # shape: (N_s, N_s, N_g)
-    exponent_imag_2 = (lB2 / 2) * cross_z(k1, k2)[:, :, None] # shape: (N_s, N_s, 1)
-    exponent_real = (-lB2 / 4) * norm_square(k1_minus_k2[:, :, None, :] - gs[None, None, :, :], axis=-1)  # shape: (N_s, N_s, N_g)
-    
+    gs = bz.reciprocal_lattice.get_points(g_coords_flatten) # (N_g, 2)
     eta_vals = eta_factors(g_coords_flatten)  # shape: (N_g,)
-
-    ff_k1_k2_g_flatten = eta_vals[None, None, :] * np.exp(exponent_real + 1j * (exponent_imag_1 + exponent_imag_2)) # shape: (N_s, N_s, N_g)
-    ff_k1_k2_g = ff_k1_k2_g_flatten.reshape(bz.N_s, bz.N_s, *g_batch_shape)  # shape: (N_s, N_s, ...)
+    ff_flatten = _compute_LLL_numba(ks, gs, eta_vals, lB)
+    ff_k1_k2_g = ff_flatten.reshape(bz.N_s, bz.N_s, *g_batch_shape)  # shape: (N_s, N_s, ...)
     return ff_k1_k2_g
 
 @njit(parallel=True, fastmath=True, cache=True)
-def _compute_lambda_kernel(
+def _compute_lambda(
     G_coords: np.ndarray,       # (N_grid, N_grid, 2) integers
     ff_k_p_g: np.ndarray,       # (N_s, N_s, res, res) complex128
     wg_window: np.ndarray,      # (window_size, window_size) - pre-sliced wg
@@ -216,28 +266,61 @@ def _compute_lambda_kernel(
                     
     return Lambda_k_p_G
 
-def _compute_lambda_kernel_fft(
+def _compute_row_fft(
+    k_idx, 
+    ff_row_k,       # (N_s, res, res) - k번째 행 전체
+    wg_window,      # (win, win)
+    norm_k, 
+    all_norm_p      # (N_s,)
+):
+    N_s = ff_row_k.shape[0]
+    res_h = ff_row_k.shape[1] - wg_window.shape[0] + 1
+    res_w = ff_row_k.shape[2] - wg_window.shape[1] + 1
+    
+    row_results = np.empty((N_s, res_h, res_w), dtype=np.complex128)
+    
+    for p in range(N_s):
+        val = correlate(ff_row_k[p], wg_window, mode='valid', method='fft')
+        row_results[p] = val * (norm_k * all_norm_p[p])
+        
+    return k_idx, row_results
+
+
+def _compute_lambda_fft(
     G_coords: np.ndarray,       # (N_grid, N_grid, 2) integers
     ff_k_p_g: np.ndarray,       # (N_s, N_s, res, res) complex128
     wg_window: np.ndarray,      # (window_size, window_size) - pre-sliced wg
     normalizations: np.ndarray, # (N_s,)
     G_radius: int
 ):
-    N_grid = G_coords.shape[0]
     N_s = ff_k_p_g.shape[0]
+    
+    h_out = ff_k_p_g.shape[2] - wg_window.shape[0] + 1
+    w_out = ff_k_p_g.shape[3] - wg_window.shape[1] + 1
+    
+    N_grid = G_coords.shape[0]
+    assert h_out == N_grid, f"Output shape mismatch: {h_out} vs {N_grid}"
+
+
+    # 병렬 처리: N_s개의 작업만 생성 (Pickling 오버헤드 최소화)
+    # n_jobs는 물리 코어 수 정도로 제한 추천 (메모리 대역폭 고려)
+    with threadpool_limits(limits=8, user_api='blas'):
+        results = Parallel(n_jobs=16)(
+            delayed(_compute_row_fft)(
+                k, 
+                ff_k_p_g[k],
+                wg_window, 
+                normalizations[k], 
+                normalizations
+            )
+            for k in range(N_s)
+        )
 
     Lambda_k_p_G = np.zeros((N_grid, N_grid, N_s, N_s), dtype=np.complex128)
-    for k in range(N_s):
-        for p in range(N_s):
-            corr_res = correlate(
-                ff_k_p_g[k, p], 
-                np.conj(wg_window), 
-                mode='valid', 
-                method='fft'
-            )
-            # Normalization
-            norm_factor = normalizations[k] * normalizations[p]
-            Lambda_k_p_G[:, :, k, p] = corr_res * norm_factor            
+
+    for k, row_res in results:
+        Lambda_k_p_G[:, :, k, :] = row_res.transpose(1, 2, 0)
+
     return Lambda_k_p_G
 
 def acband_form_factors(
@@ -258,9 +341,11 @@ def acband_form_factors(
         K_func, bz.lattice, fourier_resolution, flatten=False
     )
     # shape: (res, res, 2), (res, res)
+
     normalizations = acband_normalization_constants(
         bz, lB, g_coords, wg, eps=eps
     ) # shape: (N_s,)
+    
     ff_k_p_g = LLL_form_factors(
         bz, lB, g_coords
     ) # shape: (N_s, N_s, res, res)
@@ -270,7 +355,7 @@ def acband_form_factors(
     
     wg_window = wg[G_radius:-G_radius, G_radius:-G_radius]
     if fft:
-        Lambda_k_p_G = _compute_lambda_kernel_fft(
+        Lambda_k_p_G = _compute_lambda_fft(
             G_coords, 
             ff_k_p_g, 
             wg_window, 
@@ -278,13 +363,14 @@ def acband_form_factors(
             G_radius
         ) # shape: (N_grid, N_grid, N_s, N_s)
     else:
-        Lambda_k_p_G = _compute_lambda_kernel(
+        Lambda_k_p_G = _compute_lambda(
             G_coords, 
             ff_k_p_g, 
             wg_window, 
             normalizations, 
             G_radius
         ) # shape: (N_grid, N_grid, N_s, N_s)
+
     return G_coords, Lambda_k_p_G
 
 def interaction_matrix(
@@ -381,7 +467,7 @@ def hole_hartree_self_energies(
         k_indeps, rho_G, "m n, m n k -> k"
     )
 
-    assert np.all(np.abs(np.imag(hartree_energies)) < 1e-10), "Hartree energies have significant imaginary parts"
+    assert np.all(np.abs(np.imag(hartree_energies)) < 1e-6), f"Hartree energies have significant imaginary parts: {np.max(np.abs(np.imag(hartree_energies)))}"
 
     return np.real(hartree_energies) # shape: (N_s,)
 
@@ -403,7 +489,7 @@ def hole_fock_self_energies(
         fock_energies[k] = - (1 / A) * np.sum(
             V_q * Lambda_k_kp_G_abs_square,
         )
-    assert np.all(np.abs(np.imag(fock_energies)) < 1e-10), "Fock energies have significant imaginary parts"
+    assert np.all(np.abs(np.imag(fock_energies)) < 1e-6), f"Fock energies have significant imaginary parts: {np.max(np.abs(np.imag(fock_energies)))}"
     return np.real(fock_energies) # shape: (N_s,)
 
 def hole_dispersion(

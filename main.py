@@ -129,7 +129,7 @@ b3 = -(b1 + b2)
 
 sigma = args.sigma
 sum_radius = args.sum_radius
-K_func_args = (3, sigma, sum_radius, a1, a2)
+K_func_args = (m, sigma, sum_radius, a1, a2)
 K_func = partial(K_func2, args=K_func_args)
 # zero_K_func = partial(K_func1, args=(0, b1, b2, b3))
 
